@@ -9,7 +9,7 @@ import { calculateDualMassResonance } from '../src/core/physics/jointResonance.t
 import { patternStateFromPhysics } from '../src/core/physics/result.ts';
 import { evaluateP006 } from '../src/core/patterns/bldc/P006.ts';
 import { deriveBldcEvaluationInput } from '../src/core/derive/bldc.ts';
-import { BLDC_HEALTHY, BLDC_P006_RUNAWAY } from '../src/fixtures/bldc.ts';
+import { BLDC_HEALTHY, BLDC_P006_OVER_TEMP_STABLE, BLDC_P006_RUNAWAY } from '../src/fixtures/bldc.ts';
 
 function assert(condition: unknown, message: string): void { if (!condition) throw new Error(message); }
 
@@ -19,8 +19,10 @@ assert(healthy.status === 'ok' && healthy.value.steadyStateExists && healthy.val
 const runaway = calculateThermalCascade({ baseTemperatureC: 125, currentRmsA: 80, rdsOn25MilliOhm: 6, rthCPerW: 35, alphaPerC: 0.01, tjMaxC: 175 });
 assert(runaway.status === 'diverged', 'true runaway fixture must be diverged');
 
-const overTempStable = calculateThermalCascade({ baseTemperatureC: 100, currentRmsA: 80, rdsOn25MilliOhm: 10, rthCPerW: 1, alphaPerC: 0.002, tjMaxC: 90 });
-assert(overTempStable.status === 'ok' && overTempStable.value.estimatedTjC > 90, 'stable but over-Tjmax case must remain a solvable physics result');
+const overTempStable = calculateThermalCascade({ baseTemperatureC: 80, currentRmsA: 50, rdsOn25MilliOhm: 10, rthCPerW: 1, alphaPerC: 0.002, tjMaxC: 110 });
+assert(overTempStable.status === 'ok' && overTempStable.value.estimatedTjC > 110, 'stable but over-Tjmax case must remain a solvable physics result');
+const overTempStablePattern = evaluateP006(deriveBldcEvaluationInput(BLDC_P006_OVER_TEMP_STABLE.issue));
+assert(overTempStablePattern.triggered === true && overTempStablePattern.veto.triggered && overTempStablePattern.trace.some(n => n.id === 'BLDC.P006.estimatedTjC'), 'stable over-Tjmax P006 regression failed');
 
 for (const bad of [
   calculateThermalCascade({ baseTemperatureC: 25, currentRmsA: -1, rdsOn25MilliOhm: 5, rthCPerW: 1, alphaPerC: 0.002, tjMaxC: 150 }),

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { assertPatternOutput } from '../src/core/model/schema.ts';
 import { patternStateFromPhysics } from '../src/core/physics/result.ts';
 import { evaluateBldcPatterns } from '../src/core/patterns/bldc/registry.ts';
-import { BLDC_HEALTHY, BLDC_MISSING, BLDC_P001_FAULT, BLDC_P003_FAULT, BLDC_P006_FAULT, BLDC_P006_RUNAWAY, BLDC_P016_FAULT } from '../src/fixtures/bldc.ts';
+import { BLDC_HEALTHY, BLDC_MISSING, BLDC_P001_FAULT, BLDC_P003_FAULT, BLDC_P006_FAULT, BLDC_P006_OVER_TEMP_STABLE, BLDC_P006_RUNAWAY, BLDC_P016_FAULT } from '../src/fixtures/bldc.ts';
 import { flatten } from '../src/core/trace/trace.ts';
 
 const map = (project: typeof BLDC_HEALTHY) => new Map(evaluateBldcPatterns(project).map((p) => [p.id, p]));
@@ -59,11 +59,12 @@ describe('AutoHW Core Phase 3 Pattern contract', () => {
     expect(diverged.riskLevel).toBe('Critical');
   });
   it('P006 over-temperature with a stable thermal solution is not mislabeled as runaway', () => {
-    const project = { ...BLDC_HEALTHY, issue: { ...BLDC_HEALTHY.issue, quantities: { ...BLDC_HEALTHY.issue.quantities, ambientC: { status: 'ok', value: 100, unit: '°C', evidence: 'MEASURED', enteredAt: 'fixture' }, currentRmsA: { status: 'ok', value: 80, unit: 'A', evidence: 'MEASURED', enteredAt: 'fixture' }, tjMaxC: { status: 'ok', value: 90, unit: '°C', evidence: 'DATASHEET', enteredAt: 'fixture' } } } } as typeof BLDC_HEALTHY;
-    const p = map(project).get('BLDC.P006')!;
+    const p = map(BLDC_P006_OVER_TEMP_STABLE).get('BLDC.P006')!;
     expect(p.triggered).toBe(true);
     expect(p.veto.triggered).toBe(true);
     expect(p.trace[0]?.id).toBe('BLDC.P006.estimatedTjC');
+    expect(p.values.find((v) => v.key === 'estimatedTjC')?.value.status).toBe('ok');
+    expect((p.values.find((v) => v.key === 'estimatedTjC')?.value as any).value).toBeGreaterThan(110);
   });
   it('VETO origin exists only on Pattern output in Phase 3', () => {
     const p = map(BLDC_P001_FAULT).get('BLDC.P001')!;

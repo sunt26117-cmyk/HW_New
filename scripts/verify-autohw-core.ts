@@ -42,7 +42,7 @@ for (const [label, project, patternId] of [
     assert.ok(p.values.length > 0);
     assert.ok(p.values.every((v) => v.value.status === 'ok' || v.value.status === 'missing'));
     const traceText = JSON.stringify(p.trace);
-    assert.ok(p.values.every((v) => !('value' in v.value) || traceText.includes(v.key) || v.value.status === 'missing'));
+    assert.ok(p.values.every((v) => v.value.status === 'missing' || traceText.includes(v.key)));
   });
 }
 
@@ -69,7 +69,8 @@ check('Pattern values contain no NaN/Infinity and all returned objects are finit
 check('Measured evidence outranks derived/eassumption evidence for one quantity', () => {
   const current = { status: 'ok', value: 3, unit: 'V', evidence: 'DERIVED', enteredAt: 'fixture' } as const;
   const measured = { status: 'ok', value: 2.8, unit: 'V', evidence: 'MEASURED', enteredAt: 'fixture' } as const;
-  assert.equal(preferEvidence(current, measured).value, 2.8);
+  const picked = preferEvidence(current, measured);
+  assert.equal(picked.status === 'ok' ? picked.value : undefined, 2.8);
   assert.equal(deriveConfidence([{ id: 'x', title: 'x', inputs: [{ key: 'k', label: 'k', value: 2.8, evidence: 'MEASURED' }], degraded: false }]), 'HIGH');
 });
 
