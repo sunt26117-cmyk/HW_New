@@ -2,6 +2,8 @@ import type { DeviceParameterCandidate } from './deviceParameterCandidates.ts';
 import { getAllEngineeringMeasurementFields } from './deviceFields.ts';
 import type { EvidenceKind } from '../model/contracts.ts';
 
+export type DeviceScenarioValueSource = EvidenceKind | 'BENCHMARK';
+
 export interface DeviceFieldProvenance { source: EvidenceKind; sourceLabel?: string; enteredAt?: string; evidenceId?: string; confidencePct?: number; note?: string; }
 
 export interface DeviceCandidateImportPayload {
@@ -58,7 +60,7 @@ const MEASUREMENT_PROTECTED_SOURCES: ReadonlyArray<EvidenceKind> = ['MEASURED', 
  */
 export function isImportOverwritable(
   perFieldSource?: EvidenceKind,
-  scenarioSource?: EvidenceKind,
+  scenarioSource?: DeviceScenarioValueSource,
   force = false,
 ): boolean {
   if (force) return true;
@@ -77,7 +79,7 @@ export function getAutoImportCandidateIds(
   candidates: DeviceParameterCandidate[],
   existingValues?: Record<string, number | string>,
   existingProvenance?: Record<string, DeviceFieldProvenance>,
-  scenarioValueSource?: EvidenceKind,
+  scenarioValueSource?: DeviceScenarioValueSource,
   force = false,
 ): Set<string> {
   return new Set(
@@ -107,7 +109,7 @@ export function buildDeviceCandidateImportPayload(
   enteredAt = new Date().toISOString(),
   confirmedReviewIds: ReadonlySet<string> = new Set(),
   existingProvenance?: Record<string, DeviceFieldProvenance>,
-  scenarioValueSource?: EvidenceKind,
+  scenarioValueSource?: DeviceScenarioValueSource,
   forceOverwriteExisting = false,
 ): DeviceCandidateImportPayload {
   const selected = candidates.filter(candidate => selectedIds.has(candidate.id));

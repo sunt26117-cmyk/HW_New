@@ -33,13 +33,13 @@ export function compareDevices(leftDevice: DeviceEntry, rightDevice: DeviceEntry
   const add = (side: 'left' | 'right', candidate: typeof leftCandidates[number]) => {
     const targetKey = keyOfCandidate(candidate);
     if (!targetKey) return;
-    const current = rowsByKey.get(targetKey) ?? {
+    const current: DeviceComparisonRow = rowsByKey.get(targetKey) ?? {
       targetKey,
       label: candidate.label,
-      unit: candidate.unit,
+      unit: candidate.unit ?? '',
       left: [],
       right: [],
-      status: 'UNKNOWN' as const,
+      status: 'UNKNOWN',
     };
     current[side].push({ value: candidate.value, source: candidate.sourceType, confidence: candidate.confidence, sourceRef: candidate.sourceRef });
     rowsByKey.set(targetKey, current);
@@ -51,7 +51,11 @@ export function compareDevices(leftDevice: DeviceEntry, rightDevice: DeviceEntry
   const rows = [...rowsByKey.values()].map((row) => {
     const leftSig = signature(row.left);
     const rightSig = signature(row.right);
-    const status = leftSig && rightSig ? (leftSig === rightSig ? 'MATCH' : 'DIFFER') : leftSig ? 'LEFT_ONLY' : rightSig ? 'RIGHT_ONLY' : 'UNKNOWN';
+    let status: DeviceComparisonRow['status'];
+    if (leftSig !== null && rightSig !== null) status = leftSig === rightSig ? 'MATCH' : 'DIFFER';
+    else if (leftSig !== null) status = 'LEFT_ONLY';
+    else if (rightSig !== null) status = 'RIGHT_ONLY';
+    else status = 'UNKNOWN';
     return { ...row, status };
   }).sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'));
 

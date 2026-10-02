@@ -443,8 +443,12 @@ export function buildMeasurementsFromChannels(
     reports.push({ channelIndex: idx, channelName: ch.name, role, evidenceId, metrics: m });
 
     if (role === 'vbus') {
+      // 同一路 Vbus 实测同时写入证据层键（vbusMeasuredPeakV）与工程层键（vbusPeakV）：
+      // 两者来自同一次测量，不允许下游各自解释。
       values.vbusMeasuredPeakV = m.peak;
       provenance.vbusMeasuredPeakV = mk(90, ['取通道峰值']);
+      values.vbusPeakV = m.peak;
+      provenance.vbusPeakV = mk(90, ['取通道峰值']);
       if (m.baselineLevel !== undefined) {
         values.vbusNominalV = m.baselineLevel;
         const notes = ['取触发前 10% 样本中位数作为标称电压'];
@@ -498,7 +502,8 @@ export function resampleUniform(time: number[], samples: number[]): UniformWavef
   if (uniform) return { time: time.slice(), samples: samples.slice(), sampleRateHz: 1 / medianDt, resampled: false };
   const start = time[0];
   const end = time[time.length - 1];
-  const count = Math.max(2, Math.round((end - start) / medianDt) + 1);
+  // 抖动只体现在时间轴上：重采样不改变记录长度，点数与原记录保持一致（不凭空多插一个采样点）。
+  const count = Math.max(2, time.length);
   const uniformDt = (end - start) / (count - 1);
   const outTime = new Array<number>(count);
   const outSamples = new Array<number>(count);

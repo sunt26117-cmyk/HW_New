@@ -1,11 +1,13 @@
 import { useMemo, useRef, useState } from 'react';
 import type { EngineeringProject } from '../../core/model/contracts.ts';
 import { BLDC_FIELDS } from '../../core/derive/bldc.ts';
-import { buildDeviceCandidateImportPayload, getAutoImportCandidateIds, type DeviceParameterCandidate, type DeviceFieldProvenance } from '../../core/evidence/deviceCandidateImport.ts';
+import { buildDeviceCandidateImportPayload, getAutoImportCandidateIds, type DeviceFieldProvenance } from '../../core/evidence/deviceCandidateImport.ts';
+import type { DeviceParameterCandidate } from '../../core/evidence/deviceParameterCandidates.ts';
 import { buildDeviceParameterCandidates } from '../../core/evidence/deviceParameterCandidates.ts';
 import { compareDevices, type DeviceComparison } from '../../core/evidence/deviceCompare.ts';
 import { getAllEngineeringMeasurementFields } from '../../core/evidence/deviceFields.ts';
-import { applyCandidateDecisions, deleteDevice, importDeviceFromJson, loadDevices, saveDevice, updateDeviceCandidateDecision, type DeviceEntry } from '../../app/evidence/deviceRepository.ts';
+import { applyCandidateDecisions, deleteDevice, importDeviceFromJson, loadDevices, saveDevice, updateDeviceCandidateDecision } from '../../app/evidence/deviceRepository.ts';
+import type { DeviceEntry } from '../../core/evidence/deviceModel.ts';
 import { DIRECT_MAPPABLE_TARGET_KEYS, CONFIRM_REQUIRED_TARGET_KEYS, DEVICE_PARAM_PROMPT, MOSFET_TEMPLATE_JSON } from '../../content/deviceTemplate.ts';
 
 function valueMap(project: EngineeringProject): Record<string, number | string> {

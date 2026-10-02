@@ -3,9 +3,15 @@ import { readCurvePoint } from '../../core/evidence/deviceModel.ts';
 export function validateDeviceCompleteness(device: DeviceEntry): string[] {
   const warnings: string[] = [];
   const raw = device.raw as Record<string, any>;
-  const curveCount = (obj: any, path: string): Array<{x:number;y:number}> => Array.isArray(obj?.points)
-    ? obj.points.map((p: unknown) => readCurvePoint(path, p)).filter((p): p is {x:number;y:number} => p.x !== undefined && p.y !== undefined).map((p) => ({x:p.x,y:p.y}))
-    : [];
+  const curveCount = (obj: unknown, path: string): Array<{x:number;y:number}> => {
+    if (!obj || typeof obj !== 'object') return [];
+    const points = (obj as { points?: unknown }).points;
+    if (!Array.isArray(points)) return [];
+    return points.flatMap((point: unknown) => {
+      const parsed = readCurvePoint(path, point);
+      return parsed.x !== undefined && parsed.y !== undefined ? [{ x: parsed.x, y: parsed.y }] : [];
+    });
+  };
   const rds = curveCount(raw.staticParams?.rdsOn, 'staticParams.rdsOn');
   if (rds.length < 2) warnings.push('Rds(on) 曲线点数不足（<2），无法进行温度插值。');
   else if (!rds.some((p) => p.x >= 125)) warnings.push('Rds(on) 缺少 ≥125°C 数据点，高温降额可信度有限。');

@@ -17,7 +17,9 @@ export function evaluateEmcC001(input: EmcEvaluationInput): PatternOutput {
   const stop = value(input, 'bciFrequencyStopMhz');
   const inj = value(input, 'bciInjectionMa');
   const harness = value(input, 'harnessLengthM');
-  const valid = [start, stop, inj, harness].every(Number.isFinite) && start >= 0 && stop > start && inj > 0 && harness > 0;
+  const valid = start !== undefined && stop !== undefined && inj !== undefined && harness !== undefined
+    && Number.isFinite(start) && Number.isFinite(stop) && Number.isFinite(inj) && Number.isFinite(harness)
+    && start >= 0 && stop > start && inj > 0 && harness > 0;
   const node = makeNode({
     id: 'EMC.C001.bciCoverage', title: 'BCI 试验覆盖条件完整性',
     formula: '频率范围、注入电流与实际线束配置必须形成同一条证据记录；本检查不替代项目标准放行判据',

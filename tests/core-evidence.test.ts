@@ -112,8 +112,8 @@ describe('device evidence', () => {
   });
 
   it('compares two devices using mapped candidate provenance, without declaring substitution feasibility', () => {
-    const left = { id:'l', deviceType:'MOSFET', partNumber:'L', manufacturer:'A', package:'', aecqGrade:'', channelType:'N', raw:{ ratings:{vds:{value:60}}, }, candidateDecisions:{}, candidateRequests:{}, createdAt:'', updatedAt:'' } as any;
-    const right = { id:'r', deviceType:'MOSFET', partNumber:'R', manufacturer:'B', package:'', aecqGrade:'', channelType:'N', raw:{ ratings:{vds:{value:80}}, }, candidateDecisions:{}, candidateRequests:{}, createdAt:'', updatedAt:'' } as any;
+    const left = { id:'l', deviceType:'MOSFET', partNumber:'L', manufacturer:'A', package:'', aecqGrade:'', channelType:'N', raw:{ maxRatings:{vds:{value:60}}, }, candidateDecisions:{}, candidateRequests:{}, createdAt:'', updatedAt:'' } as any;
+    const right = { id:'r', deviceType:'MOSFET', partNumber:'R', manufacturer:'B', package:'', aecqGrade:'', channelType:'N', raw:{ maxRatings:{vds:{value:80}}, }, candidateDecisions:{}, candidateRequests:{}, createdAt:'', updatedAt:'' } as any;
     const comparison = compareDevices(left, right, new Set(['vdsRatingV']));
     expect(comparison.left.partNumber).toBe('L');
     expect(comparison.rows.some((row) => row.status === 'DIFFER')).toBe(true);

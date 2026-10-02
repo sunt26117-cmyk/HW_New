@@ -42,7 +42,7 @@ export function evaluateEmcP001(input: EmcEvaluationInput): PatternOutput {
     { key: 'bciTestResultFlag', label: '功能失效观察', value: input.quantities.bciTestResultFlag },
   ];
   return finalizePattern({
-    id: 'EMC.P001', name: 'BCI 功能抗扰异常', kind: 'FAILURE_MODE', triggered: failed, riskLevel: failed ? 'High' : 'Low',
+    id: 'EMC.P001', name: 'BCI 功能抗扰异常', kind: 'FAILURE_MODE', triggered: failed,
     veto: { triggered: false }, values, trace: [node], measures: failed ? [EMC_CONTENT.measures.pathIsolation(), EMC_CONTENT.measures.testContainment()] : [EMC_CONTENT.measures.pathIsolation()],
     verification: [EMC_CONTENT.verification.bci, EMC_CONTENT.verification.path], unknowns: [],
   }, failed ? 'High' : 'Low');
