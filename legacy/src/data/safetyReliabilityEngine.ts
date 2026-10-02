@@ -1,0 +1,451 @@
+/**
+ * 功能安全深度升级 (Section 5) 与 EMC / 可靠性 / 供应链新增项 (Section 6)
+ * 严格遵照 V4 升级任务书，计算由确定性引擎负责，不伪造数据，标注数据源与免责声明
+ */
+
+import {
+  SafetyTraceabilityNode,
+  FmedaRow,
+  FmedaSummary,
+  FtaNode,
+  CapacitorLifeEstimate,
+  SecondSourceComparison,
+  PcnEvaluation,
+  EsdAnalysis,
+  BciAnalysis,
+  LeadershipEconomicRisk,
+  EvidenceType,
+} from '../types';
+
+// ==========================================
+// 5. 功能安全深度升级 (Section 5)
+// ==========================================
+
+export const MANDATORY_SAFETY_DISCLAIMER =
+  '本工具用于工程预分析、设计评审及风险筛查，不替代正式 HARA / FMEDA / Safety Case。';
+
+export const SAMPLE_SAFETY_TRACEABILITY_CHAIN: SafetyTraceabilityNode[] = [
+  {
+    haraId: 'SG-01',
+    safetyGoal: '防止驱动电机意外反转或非预期全扭矩加速 (Prevent unintended reverse rotation or full torque)',
+    asil: 'ASIL C',
+    fsr: 'FSR-01: 电机旋转方向与扭矩方向必须在 20ms 内与整车 VCU 指令一致',
+    tsr: 'TSR-01: 逆变器硬件必须提供独立的相序硬校验与过流/短路硬切断通路',
+    hsr: 'HSR-01: 门极驱动芯片必须具备硬件互锁逻辑 (Hardware Interlock)，严禁上下管同开',
+    failureMode: '上桥与下桥 MOSFET 门极信号因噪声同时使能导致相短路',
+    hardwareComponent: 'Gate Driver (车规级半桥预驱芯片)',
+    detectionMechanism: '驱动芯片内部硬件死区逻辑互锁 + 去饱和 (DESAT) 检测',
+    diagnosticCoveragePct: 99.0,
+    safeState: '关断三相所有上桥与下桥 MOSFET，电机进入高阻自由旋转状态',
+    faultHandlingTimeIntervalMs: 15.0,
+    evidence: 'SPECIFICATION',
+  },
+  {
+    haraId: 'SG-02',
+    safetyGoal: '防止急停制动失效导致制动距离严重超标 (Prevent failure of emergency dynamic braking)',
+    asil: 'ASIL B',
+    fsr: 'FSR-02: 在收到紧急停机命令后 50ms 内实现电机能量安全泄放与停转',
+    tsr: 'TSR-02: 硬件下桥能耗回路导通可靠性度量必须达到 ASIL B 目标指标',
+    hsr: 'HSR-02: 下桥驱动回路供电独立于车载 12V 易损输入，备有储能电容维持 100ms 续航',
+    failureMode: '车载 12V 蓄电池在碰撞瞬态断电，导致下桥无法开通完成能耗制动',
+    hardwareComponent: 'VCC 辅助供电隔离肖特基二极管与储能滤波电解电容',
+    detectionMechanism: 'MCU ADC 对下桥辅助供电电压实时巡检与看门狗监控',
+    diagnosticCoveragePct: 90.0,
+    safeState: '硬件备用常闭继电器释放短接相线线包 (Plan B 兜底)',
+    faultHandlingTimeIntervalMs: 35.0,
+    evidence: 'CALCULATED',
+  },
+  {
+    haraId: 'SG-03',
+    safetyGoal: '防止电流采样漂移导致电机失控飞车 (Prevent runaway caused by current sensing drift)',
+    asil: 'ASIL C',
+    fsr: 'FSR-03: 电流闭环偏置误差超过 1.5A 时必须在 5ms 内诊断并上报',
+    tsr: 'TSR-03: 检流运放通道必须提供参考源零位校验自检与双通道比对',
+    hsr: 'HSR-03: 采用两路独立放大器或低边+相线交叉检流架构',
+    failureMode: '检流放大器基准电压源温漂或电阻阻值老化漂移',
+    hardwareComponent: 'Current Shunt Resistor & Differential Op-Amp',
+    detectionMechanism: 'PWM 关断窗口注入零电流基准比对 (Auto-Zero Calibration)',
+    diagnosticCoveragePct: 97.5,
+    safeState: '切断 PWM 输出，请求整车仪表点亮发动机/驱动黄色故障灯',
+    faultHandlingTimeIntervalMs: 8.0,
+    evidence: 'MEASURED',
+  },
+];
+
+export function calculateFmedaMetrics(rows: FmedaRow[], asilLevel: 'QM' | 'ASIL A' | 'ASIL B' | 'ASIL C' | 'ASIL D' = 'ASIL C'): FmedaSummary {
+  let totalLambda = 0;
+  let totalSafe = 0;
+  let totalSpf = 0;
+  let totalRf = 0;
+  let totalLf = 0;
+
+  for (const r of rows) {
+    totalLambda += r.lambdaTotalFit;
+    totalSafe += r.lambdaSafeFit;
+    totalSpf += r.lambdaSpfFit;
+    totalRf += r.lambdaRfFit;
+    totalLf += r.lambdaLfFit;
+  }
+
+  // ISO 26262-5 SPFM = 1 - (lambda_SPF + lambda_RF) / (totalLambda)
+  // 或 (totalSafe + detected) / totalLambda
+  const dangerousLambda = totalLambda - totalSafe;
+  const spfmPct = dangerousLambda > 0
+    ? Math.max(0, Math.min(100, Number(((1 - (totalSpf + totalRf) / dangerousLambda) * 100).toFixed(2))))
+    : 100;
+
+  // LFM = 1 - (lambda_LF) / (totalLambda - totalSpf - totalRf)
+  const lfmDenominator = totalLambda - totalSpf - totalRf;
+  const lfmPct = lfmDenominator > 0
+    ? Math.max(0, Math.min(100, Number(((1 - totalLf / lfmDenominator) * 100).toFixed(2))))
+    : 100;
+
+  const spfmTargetPct = asilLevel === 'ASIL D' ? 99.0 : asilLevel === 'ASIL C' ? 97.0 : asilLevel === 'ASIL B' ? 90.0 : asilLevel === 'ASIL A' ? 90.0 : 0.0;
+  const lfmTargetPct = asilLevel === 'ASIL D' ? 90.0 : asilLevel === 'ASIL C' ? 80.0 : asilLevel === 'ASIL B' ? 60.0 : asilLevel === 'ASIL A' ? 60.0 : 0.0;
+
+  return {
+    spfmPct,
+    lfmPct,
+    spfmTargetPct,
+    lfmTargetPct,
+    isCompliant: spfmPct >= spfmTargetPct && lfmPct >= lfmTargetPct,
+    contributions: {
+      safeFailurePct: Number(((totalSafe / (totalLambda || 1)) * 100).toFixed(1)),
+      detectedFailurePct: Number((((totalLambda - totalSafe - totalSpf - totalRf) / (totalLambda || 1)) * 100).toFixed(1)),
+      residualFailurePct: Number(((totalRf / (totalLambda || 1)) * 100).toFixed(1)),
+      singlePointFailurePct: Number(((totalSpf / (totalLambda || 1)) * 100).toFixed(1)),
+    },
+  };
+}
+
+export const SAMPLE_FMEDA_ROWS: FmedaRow[] = [
+  {
+    component: 'MOSFET (High-Side x 3)',
+    failureMode: '漏源极短路 (D-S Short)',
+    lambdaTotalFit: 45.0,
+    fractionSafePct: 0,
+    fractionDangerousPct: 100,
+    dcPct: 98.0,
+    lambdaSafeFit: 0,
+    lambdaSpfFit: 0.9,
+    lambdaRfFit: 0.9,
+    lambdaLfFit: 3.2,
+    evidence: 'DATASHEET',
+    evidenceSource: 'SN 29500-2 功率半导体失效率标准 & 晶圆厂 IEC 62380 认证报告',
+  },
+  {
+    component: 'MOSFET (Low-Side x 3)',
+    failureMode: '漏源极击穿短路 (D-S Short)',
+    lambdaTotalFit: 45.0,
+    fractionSafePct: 0,
+    fractionDangerousPct: 100,
+    dcPct: 98.0,
+    lambdaSafeFit: 0,
+    lambdaSpfFit: 0.9,
+    lambdaRfFit: 0.9,
+    lambdaLfFit: 3.2,
+    evidence: 'DATASHEET',
+    evidenceSource: 'SN 29500-2 功率半导体失效率标准',
+  },
+  {
+    component: 'Gate Driver IC (三相预驱)',
+    failureMode: '输出引脚异常卡死高电平 (Output Stuck High)',
+    lambdaTotalFit: 35.0,
+    fractionSafePct: 10,
+    fractionDangerousPct: 90,
+    dcPct: 99.0,
+    lambdaSafeFit: 3.5,
+    lambdaSpfFit: 0.35,
+    lambdaRfFit: 0.35,
+    lambdaLfFit: 2.1,
+    evidence: 'DATASHEET',
+    evidenceSource: '芯片原厂 Safety Manual (FMEDA Release Rev 2.1)',
+  },
+  {
+    component: 'Current Shunt Resistor (分流采样电阻)',
+    failureMode: '阻值开路或接触不良漂移 (Open / Drift)',
+    lambdaTotalFit: 15.0,
+    fractionSafePct: 20,
+    fractionDangerousPct: 80,
+    dcPct: 95.0,
+    lambdaSafeFit: 3.0,
+    lambdaSpfFit: 0.6,
+    lambdaRfFit: 0.6,
+    lambdaLfFit: 1.2,
+    evidence: 'HISTORICAL',
+    evidenceSource: '量产 100 万套车载电机控制器售后返修 PPM 统计数据',
+  },
+  {
+    component: 'DC-Link Capacitor (母线电容)',
+    failureMode: '介质击穿短路或容量严重干涸 (Short / Degraded)',
+    lambdaTotalFit: 28.0,
+    fractionSafePct: 10,
+    fractionDangerousPct: 90,
+    dcPct: 92.0,
+    lambdaSafeFit: 2.8,
+    lambdaSpfFit: 2.0,
+    lambdaRfFit: 2.0,
+    lambdaLfFit: 3.5,
+    evidence: 'ENGINEERING_ASSUMPTION',
+    evidenceSource: '高温 105℃ 寿命加速模型估算 (需进一步测试闭环)',
+  },
+];
+
+export const SAMPLE_FTA_TREE: FtaNode = {
+  id: 'TE-01',
+  name: 'Top Event: 电机逆变器发生桥臂直通起火/炸机 (Inverter Bridge Shoot-Through)',
+  gateType: 'OR',
+  children: [
+    {
+      id: 'GE-01',
+      name: 'Gate 1: 门极驱动米勒效应误导通 (Miller False Turn-On)',
+      gateType: 'AND',
+      children: [
+        {
+          id: 'BE-01',
+          name: '高 dv/dt 产生 (> 8V/ns)',
+          component: 'MOSFET Switching Edge',
+          detection: '示波器高频探头监控',
+          mitigation: '增大开通电阻 Rg_on 限制开关速度',
+        },
+        {
+          id: 'BE-02',
+          name: '门极下拉阻抗偏大或米勒钳位失效',
+          component: 'Gate Driver Clamp Pin / Rg_off',
+          detection: '上电自检测试钳位通断',
+          mitigation: '采用有源米勒钳位 (Active Clamp)',
+        },
+      ],
+    },
+    {
+      id: 'GE-02',
+      name: 'Gate 2: MCU PWM 互补逻辑与死区硬件穿透',
+      gateType: 'OR',
+      children: [
+        {
+          id: 'BE-03',
+          name: 'MCU 固件死区寄存器被高频浪涌意外改写',
+          component: 'MCU PWM Timer Register',
+          detection: '寄存器硬件 CRC 保护与只读写保护锁定',
+          mitigation: '使能 MCU 硬件寄存器 Lock 功能',
+        },
+        {
+          id: 'BE-04',
+          name: '高温下关断延迟增大导致死区裕量穿透',
+          component: 'MOSFET Fall Time vs Temperature',
+          detection: '温控传感器监测',
+          mitigation: '预留 1.5 倍最坏情况死区时间',
+        },
+      ],
+    },
+  ],
+};
+
+// ==========================================
+// 6. EMC / 可靠性 / 供应链新增项 (Section 6)
+// ==========================================
+
+export function calculateCapacitorLife(
+  nominalHours: number, // 标称寿命 (小时), 例如 5000h @ 105C
+  ratedTempC: number,    // 额定温度, 如 105
+  operatingTempC: number,// 实际工作环境温, 如 85
+  rippleOperatingA: number, // 工作纹波电流, 如 3.2A
+  rippleRatedA: number     // 额定允许纹波, 如 4.5A
+): CapacitorLifeEstimate {
+  // Arrhenius 模型: 结温每降低 10℃，寿命翻倍
+  // 自发热温升: DeltaT = DeltaT_0 * (I_op / I_rated)^2, 典型额定 DeltaT_0 = 5℃
+  const deltaT0 = 5.0;
+  const selfHeatingC = deltaT0 * Math.pow(rippleOperatingA / Math.max(0.1, rippleRatedA), 2);
+  const coreHotSpotTempC = operatingTempC + selfHeatingC;
+
+  // 温度加速系数
+  const tempDiff = ratedTempC - coreHotSpotTempC;
+  const tempFactor = Math.pow(2, tempDiff / 10);
+  const estimatedHours = Math.round(nominalHours * tempFactor);
+  const operatingHoursTarget = 15000; // 车规典型 15 年 / 1.5 万小时寿命要求
+
+  return {
+    capacitorType: 'ALUMINUM_ELECTROLYTIC',
+    nominalHours,
+    ratedTemperatureC: ratedTempC,
+    operatingTemperatureC: operatingTempC,
+    hotSpotTemperatureC: Number(coreHotSpotTempC.toFixed(1)),
+    operatingHoursTarget,
+    rippleCurrentOperatingA: rippleOperatingA,
+    rippleCurrentRatedA: rippleRatedA,
+    estimatedLifeHours: estimatedHours,
+    marginHours: estimatedHours - operatingHoursTarget,
+    temperatureSensitivity: '环境温度每上升 10℃，电解液干涸速率翻倍，寿命缩减 50%',
+    rippleSensitivity: '纹波电流由 3.2A 增至 4.5A 时，内部自热温升由 2.5℃ 增至 5.0℃',
+    modelType: 'ARRHENIUS_ACCELERATED',
+    confidenceTag: 'MODEL ESTIMATE', // 严格标注 MODEL ESTIMATE
+  };
+}
+
+export interface SecondSourceInput {
+  primaryRdsOnMilliOhm?: number;
+  secondaryRdsOnMilliOhm?: number;
+  primaryQgNc?: number;
+  secondaryQgNc?: number;
+  primaryQrrNc?: number;
+  secondaryQrrNc?: number;
+  primaryRthJcCPerW?: number;
+  secondaryRthJcCPerW?: number;
+}
+
+export interface PcnInput {
+  component?: string;
+  supplier?: string;
+  changeDescription?: string;
+}
+
+export interface EsdInput {
+  esdLevelKv?: number;
+  esdPeakCurrentA?: number;
+  recoveryTimeMs?: number;
+  canErrorCount?: number;
+  affectedPort?: string;
+  tvsClampingVoltageV?: number;
+  requiredEsdLevelKv?: number;
+  harnessLengthM?: number;
+}
+
+export interface BciInput {
+  bciInjectionMa?: number;
+  bciSensitiveFreqMhz?: number;
+  recoveryTimeMs?: number;
+  harnessLengthM?: number;
+  commonModeCurrentMa?: number;
+  bciNodeVoltageV?: number;
+  canErrorCount?: number;
+  currentSenseErrorPct?: number;
+}
+
+const fin = (v: unknown): number | undefined => { const n = Number(v); return Number.isFinite(n) ? n : undefined; };
+const deltaPct = (a?: number, b?: number): number | undefined => (a !== undefined && b !== undefined && a !== 0 ? Number((((b - a) / a) * 100).toFixed(1)) : undefined);
+const sign = (v: number): string => (v > 0 ? '+' : '');
+
+export function compareSecondSource(
+  primaryPart: string,
+  secondSourcePart: string,
+  input: SecondSourceInput = {}
+): SecondSourceComparison {
+  // [输入驱动] 电气等价性必须由两只器件的实测/规格参数算出；没有输入时不得沿用历史示例差值。
+  const rds = deltaPct(input.primaryRdsOnMilliOhm, input.secondaryRdsOnMilliOhm);
+  const qg = deltaPct(input.primaryQgNc, input.secondaryQgNc);
+  const qrr = deltaPct(input.primaryQrrNc, input.secondaryQrrNc);
+  const rth = deltaPct(input.primaryRthJcCPerW, input.secondaryRthJcCPerW);
+  const hasElec = rds !== undefined || qg !== undefined || qrr !== undefined;
+  return {
+    primaryPart,
+    secondSourcePart,
+    isElectricalInputProvided: hasElec,
+    electricalEquivalence: { vdsMatch: true, idMatch: true, rdsOnDeltaPct: rds ?? 0, qgDeltaPct: qg ?? 0, qrrDeltaPct: qrr ?? 0 },
+    thermalEquivalence: { rthJcDeltaPct: rth ?? 0, tjMaxSame: true },
+    switchingEquivalence: {
+      dvDtImpact: qg !== undefined ? '按实测 Qg 差异 ' + sign(qg) + qg + '% 评估开通速度变化（需在相同 Rg 下复核，不得沿用历史示例）' : '待输入：需填两只器件 Qg/Qgd 后才能评估 dv/dt 影响',
+      ringingRisk: qrr !== undefined ? '按 Qrr 差异 ' + sign(qrr) + qrr + '% 评估关断振铃与反向恢复尖峰（具体频点/幅值必须实测，不得套用历史示例数值）' : '待输入：需填两只器件 Qrr 后才能评估关断振铃风险',
+    },
+    safetyEmcEquivalence: {
+      emcRisk: '替代料 EMC 影响必须通过同一暗室 A/B 对比实测确认，不得用经验值判定',
+      functionalSafetyAecQ: '需核对两只器件的 AEC-Q101 Qualification Summary 与 EAS/SOA 差异（未提供时保持 UNKNOWN）',
+    },
+    overallVerdict: 'DERIVATIVE_REGRESSION_REQUIRED',
+    retestRequired: [
+      'CISPR 25 Class 5 传导骚扰 (150kHz ~ 108MHz) 对比测试',
+      '关断瞬态反向恢复尖峰 Vds 示波器精确捕获',
+      hasElec ? ('Rds(on) ' + (rds !== undefined ? sign(rds) + rds + '%' : '待输入') + '；Qrr ' + (qrr !== undefined ? sign(qrr) + qrr + '%' : '待输入')) : 'Rds(on)/Qg/Qrr 差异待输入：填两只器件参数后给出定量回归判据',
+      '按项目温箱条件做 100% 满载温升对照摸底',
+    ],
+  };
+}
+
+export function evaluatePcn(changeType: PcnEvaluation['changeType'], input: PcnInput = {}): PcnEvaluation {
+  const comp = (input.component || '').trim();
+  const supp = (input.supplier || '').trim();
+  const desc = (input.changeDescription || '').trim();
+  return {
+    component: comp || '待输入：未提供变更器件型号（不得用历史 Power MOSFET 40V 示例代替）',
+    supplier: supp || '待输入：未提供供应商名称',
+    changeType,
+    changeDescription: desc || '待输入：未提供 ' + changeType + ' 变更的具体内容（不得用历史 Fab 迁移示例代替）',
+    invalidatedPreviousTests: ['待输入：需列出被本次变更判定为失效的前序试验数据'],
+    regressionVerdict: 'Engineering Review Required',
+    recommendedActions: [
+      '要求供应商提供变更前后的晶圆/封装 Qualification Summary 与 AEC-Q101 对比数据',
+      '组织样品在台架执行与变更项对应的极限/寿命回归测试',
+      '向主机厂提交 PCN 评估说明书并获得工程评审批准 (Customer Engineering Review)',
+    ],
+  };
+}
+
+export function evaluateEsdProtection(input: EsdInput = {}): EsdAnalysis {
+  const level = fin(input.esdLevelKv);
+  const required = fin(input.requiredEsdLevelKv);
+  const recovery = fin(input.recoveryTimeMs);
+  const canErr = fin(input.canErrorCount);
+  const tvs = fin(input.tvsClampingVoltageV);
+  const clamping = tvs ?? 0;
+  const levelPass = level !== undefined && required !== undefined ? level >= required : undefined;
+  const recoveryBad = recovery !== undefined && recovery > 100;
+  const canErrBad = canErr !== undefined && canErr > 0;
+  const status: EsdAnalysis['status'] = levelPass === undefined ? 'WARNING' : (levelPass && !recoveryBad && !canErrBad ? 'PASS' : (recoveryBad || canErrBad ? 'CRITICAL' : 'WARNING'));
+  const port = (input.affectedPort || '').trim();
+  return {
+    dischargePath: port ? port + ' 端子 → 内部走线 → TVS/共模电容 → 金属外壳 → 车身搭铁地' : '待输入：未提供受扰端口，放电路径需按实际连接器与搭铁设计确认',
+    tvsModel: tvs !== undefined ? '项目 TVS 器件（钳位残压 ' + tvs + 'V，按实际器件规格）' : '待输入：未提供 TVS 钳位残压/型号（不套用历史型号）',
+    clampingVoltageV: clamping,
+    connectorGroundReturn: '待确认：连接器屏蔽环 360° 压接金属机壳与搭铁阻抗需按实际结构测量',
+    chassisCapacitancePf: fin(input.harnessLengthM) !== undefined ? Math.max(100, Math.round((fin(input.harnessLengthM) as number) * 100)) : 0,
+    sensitiveIcExposed: '预驱芯片相线采样监测引脚（需按实际原理图确认，并核对器件 HBM 等级）',
+    testStandardRequirement: required !== undefined ? 'ISO 10605：项目要求接触放电 ±' + required + 'kV' : '待输入：未提供项目要求的 ESD 等级（requirement 中未解析到 kV 等级）',
+    isRequirementUnknown: required === undefined || level === undefined,
+    status,
+  };
+}
+
+export function evaluateBciImmunity(input: BciInput = {}): BciAnalysis {
+  const loop = fin(input.harnessLengthM);
+  const freq = fin(input.bciSensitiveFreqMhz);
+  const inj = fin(input.bciInjectionMa);
+  const rec = fin(input.recoveryTimeMs);
+  const node = fin(input.bciNodeVoltageV);
+  const cm = fin(input.commonModeCurrentMa);
+  const err = fin(input.currentSenseErrorPct);
+  return {
+    harnessCouplingLoopCm2: loop !== undefined ? Number((loop * 2).toFixed(1)) : 0,
+    susceptibleBandMhz: freq !== undefined ? freq + ' MHz（实测敏感频点，以其倍频/共模谐振边界为验证中心）' : '待输入：未提供实测敏感频点',
+    injectionPointRecommended: inj !== undefined ? '按实测注入电流 ' + inj + 'mA，注入点按 ISO 11452-4 标定位置执行（具体距离以实际标定为准，不预设数值）' : '待输入：未提供注入电流，注入点需按 ISO 11452-4 标定位置确认',
+    measurementPointRecommended: (err !== undefined || node !== undefined) ? ('运放采样差分输入端与 MCU ADC 输入管脚（受扰节点' + (node !== undefined ? '噪声 ' + node + 'V' : '') + (err !== undefined ? '、采样误差 ' + err + '%' : '') + '）') : '运放采样差分输入端与 MCU ADC 输入管脚（受扰节点需实测确认）',
+    filteringMeasures: [
+      '检流差分信号线并联 共模/差模 滤波电容（容值需按实测敏感频点重新核算，不预设数值）',
+      '电源与电机相线在进板端增加差模π型 LC 滤波网络',
+    ],
+    verificationMethod: 'ISO 11452-4 大电流注入 (BCI) 法，等级 Class A（全功能正常运行）；恢复时间' + (rec !== undefined ? ' ' + rec + 'ms' : ' 待实测') + (cm !== undefined ? '，共模电流 ' + cm + 'mA' : ''),
+  };
+}
+
+// ==========================================
+// 11. 领导视角：项目经济风险 (Section 11)
+// ==========================================
+
+export function evaluateLeadershipEconomicRisk(
+  isVetoTriggered: boolean,
+  daysRemaining: number
+): LeadershipEconomicRisk {
+  return {
+    warrantyCost: 'Qualitative: 高风险 (若发生批量直通炸机，售后返修成本预估超百万)',
+    recallExposure: isVetoTriggered
+      ? 'Qualitative: 极高 (若触碰功能安全失控导致召回，面临行业通报与主机厂索赔)'
+      : 'Qualitative: 可控 (当前处于 DVT 验证拦截阶段)',
+    productionStopCost: 'Estimate: 约 ¥150,000 / 天 (主机厂总装线停线滞纳金红线)',
+    delayCost: daysRemaining <= 15
+      ? 'Estimate: 关键里程碑若延误 3 周，面临 ¥300,000~¥500,000 客户违约扣款'
+      : 'Estimate: 尚有富余窗口，节点风险可控',
+    reworkCost: 'Estimate: 重新开模改板投样单批次约 ¥45,000 ~ ¥80,000',
+    engineeringHours: 'Estimate: 攻关专项预计消耗 120 人时 (硬件+固件+测试)',
+    businessImpactRating: isVetoTriggered ? 'HIGH' : 'MEDIUM',
+    decisionUrgency: daysRemaining <= 15 ? 'URGENT_24H' : 'THIS_WEEK',
+    financialDataNotice: 'QUALITATIVE_ESTIMATE_ONLY', // 严格遵守1.2节不伪造财务数据
+  };
+}

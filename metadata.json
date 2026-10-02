@@ -1,0 +1,6 @@
+{
+  "name": "AutoHW Core",
+  "description": "离线优先的车规硬件风险决策副驾：确定性物理、字段级 Trace、VETO、C-T-S-Q-L 候选方案与受控交付。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["OFFLINE_DETERMINISTIC_ENGINE", "TRACEABILITY", "DECISION_OPTIONS", "AUDITED_AI_NARRATIVE"]
+}

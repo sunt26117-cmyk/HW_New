@@ -1,0 +1,521 @@
+import { ProjectContext, IssueInput, CopilotAnalysisResult, CandidateAction } from '../types';
+import type { ScenarioPillars } from '../types';
+import { recalculateStandardWeightedScore } from '../utils/scoringWeights';
+import { readMeasuredNumber } from '../utils/unifiedStateExtractor';
+
+function calculateCtsql(T: number, S: number, C: number, Q: number, L: number): number {
+  return recalculateStandardWeightedScore({ T, S, C, Q, L });
+}
+
+export function generateRobotJointAnalysis(context: ProjectContext, issue: IssueInput): CopilotAnalysisResult {
+  // 动态评分：技术/进度分随当前背隙超规格程度与剩余工期变化，成本/质量/可靠性保留方案画像。
+  const mv = issue.measuredValues || {};
+  // 统一读数：''/null 不能再被读成 0，否则「缺背隙」会把风险严重度算低（方向是低估，不是高估）。
+  const num = (k: string) => readMeasuredNumber(mv, k);
+  const backlash = num('backlashArcmin');
+  const required = num('requiredPositionAccuracyArcmin');
+  const daysRemaining = context.daysRemaining;
+  let riskSeverity = 50;
+  if (backlash !== undefined && required !== undefined && required > 0) {
+    riskSeverity = Math.max(20, Math.min(95, 55 + (backlash / required - 1) * 30));
+  }
+  const daysFactor = typeof daysRemaining === 'number' && daysRemaining <= 7 ? 1 : 0;
+  const clamp = (v: number) => Math.max(15, Math.min(98, Math.round(v)));
+  const scoreA = { T: clamp(90 + (riskSeverity - 50) * 0.25), S: clamp(58 - daysFactor * 18), C: 50, Q: 93, L: 90 };
+  const scoreB = { T: clamp(86 + (riskSeverity - 50) * 0.2), S: clamp(94 + daysFactor * 2), C: 86, Q: 90, L: 92 };
+  const scoreC = { T: 45, S: 90, C: 92, Q: 42, L: 35 };
+
+  const candidateActions: CandidateAction[] = [
+    {
+      id: 'Option A',
+      category: 'conservative',
+      categoryLabel: '硬件与机构根治 (改动周期较长)',
+      name: '谐波减速器柔轮轴向精密垫片预紧 + STO 双通道物理电气绝对隔离重构 + 泄放电阻移至外壳传热',
+      description: '1. 机械装配重做：重新装配关节减速器，通过高精磨削垫片将谐波减速器柔轮轴向预紧，将初始机械背隙显著压低（具体收敛值须按本项目实测确认）；2. 驱动控制板重新 Layout：彻底分离 STO Channel 1 与 Channel 2 供电与走线，使用独立 IEC 61800-5-2 认证光耦及独立隔离电源，电气爬电间距按标准安规要求核算，杜绝共因失效 (CCF)；3. 热设计：制动泄放电阻从驱动腔体移出，通过导热硅脂紧贴关节铝合金壳体散热。',
+      expectedBenefit: '机械背隙可通过精密预紧显著压低（具体收敛值须实测确认）；STO 具备完全硬件独立性，满足 ISO 13849-1 Cat 3 PLd 认证；泄放电阻温升受控，支持持续往复作业。',
+      scores: {
+        T: scoreA.T, S: scoreA.S, C: scoreA.C, Q: scoreA.Q, L: scoreA.L,
+        total: calculateCtsql(scoreA.T, scoreA.S, scoreA.C, scoreA.Q, scoreA.L),
+      },
+      veto: { rejection_veto: false },
+      referenced_standards: [
+        { standard: 'ISO 13849-1', clause: 'Section 6.2.6 (Cat 3)', relevance: '安全相关部件双通道独立性要求，单点故障不得导致安全功能丧失，且在合理可行时检测故障' },
+        { standard: 'IEC 61800-5-2', clause: 'Clause 4.2.2.2 (STO)', relevance: '安全扭矩关断 (Safe Torque Off) 硬件回路独立性与端到端切断时延规范' },
+        { standard: 'ISO 9283', clause: 'Section 7.2', relevance: '工业机器人末端位姿准确度与重复定位精度评定方法' },
+        { standard: 'IEC 60204-1', clause: 'Section 9.2.2', relevance: '机械电气设备停止类别 0 级断电安全切断' },
+      ],
+      riskBefore: '末端定位误差超差与否需按客户规格与本项目实测判定；STO 单光耦共地存在单点旁路直通安全隐患；泄放电阻过热可能导致停机降额。',
+      riskAfter: '机构背隙消除，安全双通道硬件物理绝对隔离达标，泄放热负荷彻底解脱。',
+      residualRisk: 'Low',
+      residualRiskDetail: '技术风险极低，唯一制约在于硬件改版出图、制板打样及减速器重新装配测试，其工期须按项目排期核算，可能直接压线或推迟当前交付节点。',
+      sideEffects: 'PCB 变更需要重新进行环境可靠性与振动测试，BOM 成本增量须按本项目报价核算。',
+      verificationCost: '费用须按本项目报价核算 (PCB 打样 + 机械研磨治具工装 + 第三方 PLd 预审复测)',
+      timeCost: '改版工期按项目排期核算（需向 PM 申请缓冲窗口）',
+      failureConsequence: '若工期超期，将影响 DVT 整体封样节点。',
+      preconditions: '结构组提供高精度研磨垫片，PCB Layout 工程师投入新版布线。',
+      verificationMethod: '激光干涉仪全行程正反向扫点 + TÜV 认可机构双通道故障注入测试 + 满载往复热稳态测试（时长按项目验证计划确定）。',
+      planB: '若 PCB 打样进度不及预期，采用方案 B 的外部独立冗余模块过渡方案支撑节点评审。',
+      riskDelta: '末端定位超差风险 + STO 共因失效 ➔ 硬件机械全面合规 (满足门禁放行)',
+      crossDomainCouplingChecks: [
+        { rule: '【ROBOT_JOINT ➔ THERMAL】泄放电阻外移紧贴外壳散热', addressed: true, note: '已增加导热衬垫与外壳接触热阻仿真，外表面温升须按本项目热仿真/实测确认是否满足人体触碰限制' },
+        { rule: '【ROBOT_JOINT ➔ SAFETY】STO 双通道硬件光耦与隔离电源物理割接', addressed: true, note: 'PCB Layout 间距按标准安规要求核算，杜绝共因失效' },
+      ],
+    },
+    {
+      id: 'Option B',
+      category: 'balanced',
+      categoryLabel: '软硬协同与双轨推进 (推荐首选)',
+      name: '激光干涉仪正反向滞环实测标定 + 软件反向间隙动态补偿 + 外置冗余安全继电器箱过渡',
+      description: '1. 运动学补偿：使用多齿分度台与激光干涉仪测出减速器正反向回程滞环曲线，驱动底层固件注入双向 Backlash 动态查表补偿与速度前馈，将末端重复定位精度显著收敛（具体收敛值须实测确认）；2. 安全合规过渡：关节驱动器外部过渡加装通过 TÜV 认证的双通道干簧式安全继电器盒，将控制柜 STO 信号分两路硬件硬切断驱动器上下桥门极电源，满足现场机构审查；3. 能量管理：优化加减速 S 曲线与加加速度 (Jerk)，压低单次减速回馈峰值功率并增加间歇节拍，泄放电阻温升下降幅度须按本项目热实测确认。',
+      expectedBenefit: '不占用 PCB 改版工期，可在数天内将定位精度收敛（具体收敛值与规格须按本项目实测/设计确认）；STO 现场审查通过独立安全盒判定合格；泄放电阻温升受控，稳固保住当前 DVT 节点。',
+      scores: {
+        T: scoreB.T, S: scoreB.S, C: scoreB.C, Q: scoreB.Q, L: scoreB.L,
+        total: calculateCtsql(scoreB.T, scoreB.S, scoreB.C, scoreB.Q, scoreB.L),
+      },
+      veto: { rejection_veto: false },
+      referenced_standards: [
+        { standard: 'ISO 13849-1', clause: 'Annex E', relevance: '双通道安全功能应用过渡与外部互锁装置' },
+        { standard: 'IEC 61800-5-2', clause: 'Clause 4.2.2.2', relevance: 'Safe Torque Off 切断时间与逻辑要求' },
+        { standard: 'ISO 9283', clause: 'Section 7.2', relevance: '工业机器人精度重复性测试' },
+      ],
+      riskBefore: '定位是否超差须按本项目实测判定，STO 单通道共因隐患，泄放电阻过热停机。',
+      riskAfter: '软件补偿后定位精度收敛（数值须实测确认），安全通道外挂冗余满足机构复审，温升稳定。',
+      residualRisk: 'Medium',
+      residualRiskDetail: '软件背隙补偿依赖减速器当前磨合状态，全寿命长期磨损后需定期二次标定；外部安全盒为 DVT 阶段让步过渡方案，量产前仍需将双通道集成进 PCB。',
+      sideEffects: '需为 DVT 样机额外配置外部过渡安全接线盒，调试需逐台录入补偿表格。',
+      verificationCost: '费用须按本项目报价核算 (激光干涉仪租用 + 外部安全继电器采购)',
+      timeCost: '调试周期按项目排期核算 (须处于当前节点窗口内)',
+      failureConsequence: '若重载下机械弹性形变仍导致误差波动，启动第二编码器双码盘闭环测试。',
+      preconditions: '关节安装刚性基座，驱动固件具备可标定的高分辨率反向间隙补偿表接口。',
+      verificationMethod: '激光干涉仪在 0%、50%、100% 额定负载下正反向反复打点测试定位精度，TÜV 机构现场审查双通道切断波形。',
+      planB: '量产版本同步启动 PCB 双通道 STO 改版（方案 A），本方案保障 DVT 评审按期通过。',
+      riskDelta: '定位超差风险 + STO 预警 ➔ 精度收敛须实测确认 + 机构通过 (受控中风险)',
+      crossDomainCouplingChecks: [
+        { rule: '【ROBOT_JOINT ➔ THERMAL】加减速 S 曲线优化削减减速再生热', addressed: true, note: '已安排连续运行温升实测，泄放电阻表面温升须按实测曲线确认未触发降额停机' },
+        { rule: '【ROBOT_JOINT ➔ SAFETY】外挂独立安全继电器箱双通道切断', addressed: true, note: '单通道人为短接/断线时，另一通道仍能可靠切断电机力矩（切断时延须按本项目实测确认），满足 Cat 3 PLd 要求' },
+      ],
+    },
+    {
+      id: 'Option C',
+      category: 'schedule_priority',
+      categoryLabel: '纯临时降额与软件屏蔽 (一票否决)',
+      name: '仅在上位机将运行速度强行大幅降额，并在驱动固件中屏蔽泄放电阻过热停机阈值',
+      description: '不改动减速器机械间隙，不加装任何外部或内部独立 STO 安全切断回路；仅在上位机配置中把机器人末端最大线速度和角加速度大幅腰斩以降低发热和惯性超冲，并在驱动固件中强行调高温度报警阈值以掩盖停机。',
+      expectedBenefit: '零硬件成本，配置修改量小，勉强避免过热停机。',
+      scores: {
+        T: scoreC.T, S: scoreC.S, C: scoreC.C, Q: scoreC.Q, L: scoreC.L,
+        total: calculateCtsql(scoreC.T, scoreC.S, scoreC.C, scoreC.Q, scoreC.L),
+      },
+      veto: {
+        rejection_veto: true,
+        veto_type: 'SAFETY_GOAL_BREACH',
+        veto_reason: '大幅降速严重违背客户产线节拍协议（单件节拍将显著恶化）；STO 未消除共因单点失效，存在碰撞急停失效引发人身重伤的致命安全违约，强制一票否决！',
+      },
+      customerVetoViolations: [
+        '客户技术协议条款 2.1：协作机器人各轴工作角速度与产线工位节拍须满足协议规定限值（具体限值按客户技术协议确认，模板不预填），当前方案严重超时违约',
+        '国际强制安规 ISO 13849-1 / IEC 61800-5-2：安全相关部件严禁采用可能被单点故障屏蔽的非独立控制通道',
+      ],
+      referenced_standards: [
+        { standard: 'ISO 13849-1', clause: 'Section 6.2.6', relevance: '控制系统安全相关部件类别要求' },
+        { standard: 'ISO 10218-1', clause: 'Section 5.4', relevance: '工业机器人安全设计停机与限速强制规范' },
+      ],
+      riskBefore: '定位精度超差，STO 存在共因隐患。',
+      riskAfter: '仍存在机械超差与安全失效隐患，且丧失额定节拍性能。',
+      residualRisk: 'High',
+      residualRiskDetail: '屏蔽过热保护可能导致泄放电阻及邻近驱动元器件烧毁甚至起火；STO 未做硬件隔离可能在急停时发生失控飞车。',
+      sideEffects: '生产效率腰斩，产品无法通过任何法规定型认证。',
+      verificationCost: '无额外验证成本',
+      timeCost: '配置修改工期按项目排期核算',
+      failureConsequence: '人机协作碰撞时无法紧急停机，造成严重人身伤害或设备损毁事故。',
+      preconditions: '无。',
+      verificationMethod: '无法通过任何车规或工业安规测试。',
+      planB: '立即废止该方案，切换为方案 B 实施闭环。',
+      riskDelta: '定位超差与安规隐患 ➔ 违约与重大失控风险 (触发一票否决)',
+      crossDomainCouplingChecks: [
+        { rule: '【ROBOT_JOINT ➔ THERMAL】强行调高温度报警阈值', addressed: false, note: '方案被一票否决：可能导致泄放电阻表面严重过热烧穿外壳' },
+        { rule: '【ROBOT_JOINT ➔ SAFETY】软件屏蔽 STO 故障', addressed: false, note: '方案被一票否决：违反 ISO 13849-1 强制法律法规' },
+      ],
+    },
+  ];
+
+  return {
+    source: 'deterministic-expert',
+    coreConclusion: {
+      problemSummary: '【ROBOT_JOINT / DVT / 剩余工期按项目节点核算】协作机器人一体化关节末端重复定位超差与否须按客户规格与本项目实测判定，STO 安全通道因共用光耦与电源被第三方机构认定不满足 PLd 独立性要求，连续重载往复因泄放电阻过热停机。',
+      recommendedMeasure: '实施方案 B：激光干涉仪正反向滞环实测标定 + 软件反向间隙动态补偿 + 外置冗余安全继电器盒过渡 (双轨推进量产 PCB 双通道改版)',
+      reasonSummary: '物理机理根治：通过激光干涉仪建立正反向滞环高精度补偿表，将末端精度收敛至客户规格以内（具体数值须实测确认）；外设安全盒消除 STO 共地单点失效，确保通过第三方现场认证；S 曲线优化降低回馈功率化解过热停机；按项目排期闭环稳保当前 DVT 节点。',
+    },
+    riskRatings: {
+      overallRisk: 'High',
+      overallRiskScore: 86,
+      technicalRisk: 'High',
+      qualityRisk: 'Medium-High',
+      scheduleRisk: 'High',
+      costRisk: 'Medium',
+      reliabilityRisk: 'Medium-High',
+      functionalSafetyRisk: 'High',
+    },
+    knownFacts: [
+      '客户产线工艺协议对末端重复定位精度的限值须按客户规格确认；当前 DVT 样机实测最大误差须以本项目实测数据为准（超差比例按实测与规格计算）。',
+      '第三方安规机构出具预审意见：两路 STO 输入信号进入同一光耦封装，且共用驱动地平面与逻辑电源，不满足 IEC 61800-5-2 / ISO 13849-1 Cat 3 PLd 硬件独立性要求。',
+      '关节在典型点位往复搬运节拍下的制动泄放电阻实测温度须按本项目温升实测确认，是否触发固件过热降额停机以实测为准。',
+      '项目当前处于 DVT 阶段，距离 PLd 认证现场评审的剩余工期与重新投板打样、装配机械的工期均须按项目排期核算。',
+    ],
+    assumptions: [
+      '假设谐波减速器柔轮与刚轮未发生塑性变形或严重疲劳磨损点蚀，误差主要来自初始背隙与弹性扭转滞环。',
+      '假设第三方安规机构接受在 DVT 阶段使用外置独立安全继电器过渡箱作为符合性测试依据，前提是量产前完成 PCB 板级集成。',
+    ],
+    unknowns: [
+      '末端误差中，减速器固有背隙占多少、受载弹性扭转变形占多少、输出端编码器安装偏心占多少？(需激光干涉仪离散标定)',
+      '多轴联动时相邻关节急停动能回馈是否会通过母线串联叠加，恶化单关节泄放电阻热负荷？',
+    ],
+    physicalMechanism: {
+      rootCauseAnalysis: '末端超差本质为谐波减速器回程死区 (Dead-band) 与输出端扭转柔性 (Torsional Compliance) 叠加，在换向瞬间形成滞环非线性；STO 违规本质为 PCB 硬件设计混淆了功能控制与安全保护的物理边界，将两路本应物理绝缘的停机回路并联于单一集成芯片及共地电源，丧失单故障容错能力；泄放过热本质为连续快速减速产生的动能以高频脉冲反向泵入 DC-Link，均方根功率突破了紧凑腔体内泄放电阻的连续稳态散热上限。',
+      keyPhysicalFactors: [
+        { factor: '谐波减速器背隙与扭转刚度', description: 'θ_error ≈ backlash + T_out/K_stiffness，回程间隙与载荷变形直接映射至末端' },
+        { factor: 'STO 双通道物理与电气独立性', description: 'IEC 61800-5-2 要求两个物理独立断开通道，光耦与电源必须无共因失效单点' },
+        { factor: '再生制动能量与连续热阻 Rth', description: 'P_regen_avg = E_kin × f_cycle，紧凑密封腔体内部热积累导致电阻过热降额' },
+        { factor: '控制环路二质量谐振频率', description: '减速器柔性与末端惯量形成低频谐振点，限制速度环与位置环增益提升' },
+      ],
+    },
+    dfmeaView: {
+      failureMode: '机器人关节末端重复定位超差（数值按本项目实测与规格判定）且 STO 双通道切断共因失效风险',
+      failureCause: '谐波减速器背隙未做算法补偿 + STO 走线与光耦共用电源地平面 + 泄放电阻连续散热裕量不足',
+      localEffect: '单关节出现回程死区（幅值须按本项目实测确认），STO 安全通道丧失单点故障切断独立性，驱动器频繁过热报警',
+      systemEffect: '机器人末端工具无法对准工装夹具产生装配卡滞，碰撞急停触发时存在切断失效或延迟可能',
+      vehicleEffect: '产线人机共融安全认证直接被一票否决，存在操作人员被挤压撞击的严重人身安全隐患',
+      severity: 9,
+      occurrence: 6,
+      detection: 4,
+      safetyImpact: true,
+      regulatoryImpact: true,
+      massProductionImpact: true,
+    },
+    candidateActions,
+    finalRecommendation: {
+      recommendedOptionId: 'Option B',
+      recommendedOptionName: '实施方案 B：激光干涉仪正反向滞环实测标定 + 软件反向间隙动态补偿 + 外置冗余安全继电器盒过渡',
+      recommendationGrade: 'Strongly Recommended',
+      whyReason: [
+        '【ROBOT_JOINT / DVT / 剩余工期按项目节点核算】精准响应工况：',
+        '物理机理闭环：通过激光干涉仪多点打靶建立高精度反向滞环补偿表，将末端精度收敛至客户工艺门限以内（具体数值须实测确认）。',
+        '安规合规过渡：外设独立双通道安全继电器模块，干簧硬切断门极供电，现场满足 TÜV 对 Cat 3 PLd 的独立性判定。',
+        '热负荷化解：S 曲线加加速度平滑与合理间歇安排，压低再生均方根功率与泄放电阻温升（具体幅度须按本项目热实测确认）。',
+        '节点无损：调试周期按项目排期核算，不占用 PCB 改版工期，牢牢保住当前 DVT 试验准入红线。',
+      ],
+      immediateSteps: [
+        {
+          step: 1,
+          title: '激光干涉仪打靶标定正反向回程滞环',
+          action: '在关节测试台架架设激光干涉仪与高精角多面棱体，按验证计划完成正反向循环打靶，测算并导出空程背隙与弹性刚度曲线。',
+          owner: 'Motion Control Lead',
+          deadline: 'Day 1 18:00',
+        },
+        {
+          step: 2,
+          title: '驱动底层固件注入双向间隙查表补偿',
+          action: '将实测滞环离散点写入固件 EEPROM 补偿表，在换向过零点实施前馈脉冲与加速度平滑注入，复测末端重复定位精度。',
+          owner: 'Embedded Algorithm Engineer',
+          deadline: 'Day 2 17:00',
+        },
+        {
+          step: 3,
+          title: '加装外置双通道独立安全继电器盒',
+          action: '在关节驱动器控制柜入口串接 Pilz/Phoenix 独立双通道安全继电器，分立切断上下桥驱动电源，完成单通道故障注入测试。',
+          owner: 'Safety HW Engineer',
+          deadline: 'Day 3 14:00',
+        },
+        {
+          step: 4,
+          title: '满载节拍耐久与第三方现场预审',
+          action: '执行额定负载点位往复运行（时长按项目验证计划确认），热电偶监测泄放电阻温升，邀请第三方认证工程师现场见证 STO 切断波形与精度复测。',
+          owner: 'Test & Certification Lead',
+          deadline: 'Day 4 18:00',
+        },
+      ],
+      preconditions: [
+        '机器人关节机械工装夹具刚性可靠，无额外结构晃动引入伪误差。',
+        '外置过渡安全继电器模块具备正式 CE / TÜV 功能安全认证证书。',
+      ],
+      unacceptableActions: [
+        '严禁在未做硬件双通道物理隔离前直接宣称满足 IEC 61800-5-2 / ISO 13849-1 Cat 3 PLd！',
+        '严禁通过简单上调过热保护停机阈值来伪造泄放电阻热平衡！',
+      ],
+      stopConditions: [
+        '若软件补偿后末端重复精度仍不满足客户规格（阈值按本项目实测与规格确认），立即启动方案 A 减速器机械垫片预紧工装。',
+        '若连续运行中泄放电阻温度突破验证阈值（按项目实测与器件降额规范确认），必须进一步增加加减速 S 曲线滤波时间。',
+      ],
+      reEvaluationTriggers: ['完成标定与第三方安规机构出具预审合格备忘录之日。'],
+      planB: '量产版本同步开展方案 A 的 PCB 硬件级 STO 物理双通道重新走线与制板，本方案仅作为 DVT 门禁放行依据。',
+    },
+    dualTimeline: {
+      containmentPhase: {
+        phaseTag: 'T_PLUS_24H_CONTAINMENT',
+        timeWindow: 'T + 24h 紧急应急围堵 (Containment)',
+        title: '软件反向间隙查表动态补偿 + 外挂独立双通道安全继电器箱过渡 + 加减速 S 曲线回馈削峰',
+        objective: '不占用 PCB 打样工期，在驱动底层注入滞环补偿算法将末端重复精度收敛（具体数值须实测确认）；外设安全盒消除 STO 共地单点失效，确保第三方现场预审通过。',
+        hardwareImpact: '无需重新制作驱动板卡，仅需测试柜加装外置安全过渡盒并刷写运动控制补丁固件。',
+        responsibilityRole: '运动控制算法负责人 (Motion Lead) & 功能安全工程师 (Safety Lead)',
+        actions: [
+          {
+            step: '1. 激光干涉仪标定与反向间隙补偿固件刷写',
+            detail: '使用激光干涉仪测量各关节正反向定位滞环，将回程死区数据烧录入固件 EEPROM，开启过零反向补偿与前馈平滑。',
+            owner: '控制算法工程师',
+            duration: '按项目排期核算',
+            hardwareImpact: '纯固件算法更新',
+            deliverable: '反向补偿固件补丁 (V1.2-Backlash-Patch) 与干涉仪测试记录',
+          },
+          {
+            step: '2. 外接 TÜV 认证双通道干簧安全继电器过渡箱',
+            detail: '在测试柜控制侧临时串接双通道独立干簧安全继电器模块，将 STO 1/2 彻底物理电气隔离切断驱动板 PWM 供电。',
+            owner: '硬件安全工程师',
+            duration: '按项目排期核算',
+            hardwareImpact: '外置电气过渡盒，无单板修改',
+            deliverable: '安全接线过渡箱及接线图纸（数量按项目样机台账确认）',
+          },
+          {
+            step: '3. 优化加减速 S 曲线并测试泄放电阻热平衡',
+            detail: '微调加减速 Jerk 限制，延长制动回馈时间，台架连续循环运转监测泄放电阻温升（具体参数与时长按项目验证计划确认）。',
+            owner: '系统测试工程师',
+            duration: '按项目排期核算',
+            hardwareImpact: '台架验证',
+            deliverable: '《连续满载运行泄放电阻温升曲线记录》',
+          },
+        ],
+        verificationCriteria: '末端重复定位精度稳定在客户规格以内（具体限值按项目实测确认），STO 双通道故障注入切断时延满足 IEC 61800-5-2 要求，泄放电阻稳态温度满足器件降额规范（模板不预填）。',
+        exitCriteria: '第三方机构出具现场符合性预审合格备忘录，DVT 样机具备装车试运行放行资格。',
+      },
+      permanentPhase: {
+        phaseTag: 'NEXT_PHASE_PERMANENT',
+        timeWindow: '下一批次 PCB 改版 / 量产定型阶段',
+        title: '驱动板 Layout 双通道绝对物理隔离 (STO PLd) + 双编码器全闭环 + 功率泄放电阻外壳导热优化',
+        objective: '从单板硬件物理架构与机械传动链彻底消除背隙、共因失效及热过载隐患，顺利通过正式 TÜV 认证并支撑大规模量产。',
+        hardwareImpact: 'PCB 重新 Layout 投板，升级光耦器件并重划隔离地岛；关节输出端加装第二编码器。',
+        responsibilityRole: '硬件架构师 & 机械系统总工',
+        actions: [
+          {
+            step: '1. PCB 驱动控制板双通道绝对物理隔离 Layout',
+            detail: 'STO 1 与 STO 2 走线爬电间距严格按标准安规要求核算，采用独立车规光耦及隔离 DC/DC 电源，通过第三方实验室全项故障注入测试。',
+            owner: 'PCB Layout 工程师',
+            duration: '按项目排期核算',
+            hardwareImpact: 'PCB 投板打样 (Rev B)',
+            deliverable: '新版 Gerber 文件与安规绝缘仿真分析报告',
+          },
+          {
+            step: '2. 关节输出侧集成 19-bit 绝对值双编码器全闭环',
+            detail: '在谐波减速器输出法兰加装高精度第二码盘，驱动器形成电机高速端与负载低速端双闭环控制，物理消除机械背隙与扭转柔性。',
+            owner: '机械与传感器工程师',
+            duration: '按项目排期核算',
+            hardwareImpact: '机械结构微调与新传感器导入',
+            deliverable: '双码盘集成图纸与首件全闭环精度测试报告',
+          },
+          {
+            step: '3. 制动泄放电阻外移贴附铝合金外壳强化散热',
+            detail: '将泄放电阻由板载改为金属外壳封装，通过高导热绝缘导热垫直接贴合至关节铝合金压铸外壳，稳态散热能力显著提升（具体倍率须按本项目热仿真/实测确认）。',
+            owner: '结构与热设计工程师',
+            duration: '按项目排期核算',
+            hardwareImpact: '结构热设计固化',
+            deliverable: '热流仿真报告与急停耐久热冲击测试报告（循环次数按项目验证计划确认）',
+          },
+        ],
+        verificationCriteria: '无需算法补偿下自然定位精度满足客户规格（具体限值须实测确认），板载 STO 通过 TÜV 正式 Cat 3 PLd 证书，连续高速满载温升满足器件降额规范（模板不预填）。',
+        exitCriteria: '取得正式 PLd 功能安全证书，通过客户 SOP PPAP 签收。',
+      },
+      strategicTradeoff: `为什么必须双层时间轴协同？
+距离当前 DVT 评审里程碑的剩余工期须按项目节点核算。如果现在强行重新设计驱动板 PCB、等待制板贴片打样并重装机械，其工期将超出当前 DVT 窗口，节点将直接违约瘫痪；
+因此在 T+24h 内必须果断采取“软件反向间隙动态补偿 + 外置独立安全继电器过渡箱 + 加减速 S 曲线回馈削峰”，在数天内将末端精度收敛（具体数值须实测确认）并消除 STO 现场违约风险；
+在随后的 SOP 准备期，再通过 PCB 物理双通道隔离、双码盘全闭环及外壳导热优化从物理硬件源头彻底固化，形成量产无死角的高可靠性产品。`,
+    },
+    raciMatrix: [
+      { role: 'Motion SW', raciType: 'R', owner: 'Motion Control Lead', action: '完成激光干涉仪双向标定与反向间隙动态补偿查表算法部署', output: '末端精度补偿固件 V2.1', dueDate: 'Day 3', decisionGate: '算法门禁' },
+      { role: 'Safety HW', raciType: 'R', owner: 'Safety HW Specialist', action: '装配外挂式独立双通道安全继电器过渡盒并完成单点故障注入试验', output: 'STO 独立切断时延与波形报告', dueDate: 'Day 4', decisionGate: '功能安全门禁' },
+      { role: 'HW', raciType: 'R', owner: 'HW Lead', action: '启动 Rev B 驱动板 Layout 重新绘制，实施双通道光耦与电源地物理割接', output: 'Rev B 驱动板量产图纸', dueDate: 'Day 15', decisionGate: '硬件改版门禁' },
+      { role: 'Mechanical', raciType: 'C', owner: 'Structural Engineer', action: '微调关节输出端轴向预紧与双编码器安装支架公差链', output: '机械精度公差优化报告', dueDate: 'Day 10', decisionGate: '结构门禁' },
+      { role: 'PM', raciType: 'A', owner: 'Project Manager', action: '管控当前 DVT 节点（工期按项目排期核算），协调第三方认证机构现场见证', output: 'DVT 攻坚计划表', dueDate: 'Day 1', decisionGate: '项目里程碑' },
+      { role: 'Quality', raciType: 'A', owner: 'QA Manager', action: '签发临时特许放行单，追踪软件补偿在急停耐久循环后的精度衰减趋势', output: '特许偏差放行跟踪表', dueDate: 'Day 5', decisionGate: '质量门禁' },
+      { role: 'Customer', raciType: 'Approval', owner: 'Robotics OEM System Lead', action: '现场见证激光干涉仪定位精度复测并签署试运行准入纪要', output: '客户产线试运行准入签核单', dueDate: 'Day 6', decisionGate: '客户准入门禁' },
+    ],
+    containment: {
+      shortTermMeasure: '固件注入反向间隙滞环补偿表消除减速器背隙；外挂独立双通道安全继电器箱过渡 STO 硬件独立性；平滑加减速 S 曲线避免电阻过热。',
+      validityScope: '当前试运行阶段全部一体化关节样机（数量按项目样机台账确认）。',
+      responsibleParty: 'Motion Control & Functional Safety Joint Taskforce',
+      timeline: '按项目排期完成调试与双向复测闭环。',
+    },
+    capa: {
+      rootCauseAction: '建立《机器人关节机电一体化设计与功能安全准则》：强制减速器输出侧双编码器全闭环；严格规定 STO 双通道在原理图与 PCB 层必须实现电气与物理绝对隔离。',
+      preventiveMeasure: '在新项目架构评审 (AAR) 节点，将减速器背隙/刚度仿真及单通道共因失效分析纳入强制门禁核对清单。',
+      lessonsLearned: '绝不能仅凭电机端单编码器做高精度关节伺服，机械谐波减速器的回程间隙与柔性迟滞必须在控制链路中闭环；功能安全 Cat 3 绝对禁止软件单通道代替双硬件隔离。',
+      verificationTarget: '量产 Rev B 样机自然精度满足客户规格（具体限值须实测确认），板载 STO 独立切断，连续满载无热降额停机（时长按项目验证计划确认）。',
+    },
+    engineeringDocs: {
+      pmDecisionEmail: {
+        subject: `【ROBOT_JOINT】${context.projectName}｜协作机器人一体化关节末端精度与 STO PLd 评审决策`,
+        technicalFact: `${issue.actualMeasurement}｜要求：${issue.requirement}`,
+        currentSituation: `距离 PLd 功能安全评审与 DVT 节点仅剩 ${context.daysRemaining} 天，重新投板周期须按项目排期核算，时间窗口极度紧迫。`,
+        risk: '若盲目等待硬件改版将导致项目整体显著延期并触发巨额违约金；若不作整改直接送检第三方，STO 单点失效与定位超差必将导致认证直接挂掉。',
+        options: '方案 A：全面停摆等待 PCB 改版与双编码器；方案 B：双轨推进 (软件反向间隙补偿 + 外置安全盒过渡 + 量产 PCB 改版并行)；方案 C：放宽公差直接放行。',
+        recommendedOption: '强烈建议采纳方案 B：激光干涉仪正反向滞环实测标定 + 软件反向间隙动态补偿 + 外置冗余安全继电器盒过渡，同时并行启动量产 PCB 双通道改版。',
+        costImpact: '方案 B 仅需过渡盒与干涉仪机时费；若改版需花费制板打样费（具体费用均须按本项目报价核算）。',
+        scheduleImpact: '方案 B 不占用 DVT 节点工期，可在数天内完成调试验证（具体工期按项目排期核算）。',
+        requiredDecision: '请 PM 批准采购外置独立安全继电器过渡盒（数量按项目样机台账确认），并协调激光干涉仪现场排期（时长按项目计划确认）。',
+        decisionOwner: 'Project Manager (PM) & Motion Tech Lead',
+        deadline: '今日下班前完成书面决议',
+        assumedProceeding: '若截止时间前未收到异议，运动控制团队将按方案 B 协调激光干涉仪并先行标定。',
+        changeConsequence: '若决策为推迟节点全面改版，将触发正式项目进度预警，DVT 节点整体顺延（天数按项目排期核算）。',
+      },
+      deviationPermit: {
+        title: '工程临时让步与偏差许可申请单 (Concession / Deviation Permit)',
+        requirement: '末端重复定位精度须满足客户规格限值（模板不预填）；STO 安全通道具备完全硬件独立性 (IEC 61800-5-2 Cat 3 PLd)',
+        actualResult: 'DVT 样机未补偿前的实测定位精度须以本项目实测数据为准；板载两路 STO 信号共用同一光耦芯片与驱动电源地',
+        deviationDetail: '允许在 DVT 样机阶段采用驱动底层反向间隙动态查表补偿技术，并使用外部独立安全继电器模块进行 STO 双通道硬切断过渡，受控进入产线试运行。',
+        technicalCause: '谐波减速器存在初始回程间隙与弹性扭转滞环；初期 PCB Layout 混淆了安全切断与常规控制地平面，未作物理割接。',
+        riskAnalysis: '软件补偿后实测精度须按本项目实测确认是否满足抓取装配工艺；外置安全盒具备独立干簧切断回路，人机碰撞急停能可靠断转矩，无安全降级风险。',
+        affectedScope: 'DVT 阶段第一批次协作臂样机 (肩关节与腕关节，数量按项目样机台账确认)',
+        containment: '每台关节驱动器完成激光干涉仪打点并烧录反向补偿表；控制柜加装外置安全过渡盒并加贴受控标识。',
+        temporaryValidity: '有效期自签发日起至 DVT 总结评审日 (有效期按项目节点确定)，量产前必须完成 PCB 板级双通道物理隔离集成。',
+        approvalRoles: 'Motion Control Lead [Signed] / Safety Manager [Signed] / Project Manager [Signed]',
+        correctiveAction: '量产版本 (Rev B) PCB 彻底分离 STO 1/2 走线与光耦封装，输出端引入双编码器全闭环控制。',
+        verificationPlan: '按项目排期完成激光干涉仪全行程精度复验，第三方安规机构现场见证 STO 故障注入切断测试。',
+        closureCriteria: '激光干涉仪复测精度满足客户规格（具体限值按项目确认），第三方出具现场评审合格备忘录，完成偏差闭环归档。',
+      },
+      meetingMinutes: {
+        title: `【ROBOT_JOINT】${context.projectName}｜关节末端精度与 STO PLd 认证整改专项评审会议纪要`,
+        attendees: 'Motion Control Lead, Safety HW Lead, Structural Lead, QA Manager, Project Manager',
+        discussionSummary: '针对末端定位超差与 STO 光耦共因失效两个关键风险进行攻关评审。结构组确认减速器初始背隙可通过精密垫片改善，但重新装配工期须按项目排期核算；硬件组确认板级双通道彻底隔离改板工期须按项目排期核算；算法组汇报激光干涉仪初测反向间隙补偿可压低误差（具体收敛值须实测确认），安全组提出外部独立安全盒过渡方案获第三方机构口头认可。会议一致决议否定延期改板方案，全力推进方案 B 软硬协同攻坚。',
+        agreements: [
+          '一致同意以方案 B 作为当前 DVT 节点的执行基线，确保在项目节点内拿到第三方合规预审。',
+          '硬件组立即启动 Rev B 单板 Layout 重新绘制，将 STO 双通道物理隔离与泄放外移作为量产永久措施。',
+          '算法组于明日上午完成激光干涉仪打靶与固件反向滞环查表补偿集成。',
+        ],
+        actionItems: [
+          'Motion：完成样机激光干涉仪标定与 EEPROM 补偿表烧录（样机数量按项目台账确认） - 责任人：Motion Lead - 截止：后天 17:00',
+          'Safety HW：完成外置双通道安全继电器过渡箱装配与故障注入实测 - 责任人：Safety HW Lead - 截止：大后天 12:00',
+          'Test：连续运转复测泄放电阻温升与末端精度（时长按项目验证计划确认） - 责任人：Test Lead - 截止：第 4 天 18:00',
+        ],
+      },
+      riskAcceptance: {
+        riskId: `RA-ROBOT-${context.projectPhase}-01`,
+        description: '协作机器人末端定位与功能安全过渡受控放行：精度依赖软件查表补偿，长期机械磨损后需定期二次标定；STO 采用外部过渡盒，量产前必须板级集成。',
+        residualRiskJustification: '当前补偿后精度须按本项目实测确认是否满足客户工艺要求；外置安全盒已通过独立性故障注入测试；双层时间轴明确了量产彻底根除计划。',
+        acceptingSignOff: 'Motion Control Lead [Signed], Functional Safety Architect [Signed], QA Director [Signed], Project Manager [Signed]',
+        expirationCondition: '自签发之日起有效（有效期按项目节点确认），或当现场精度漂移突破客户规格、泄放电阻温度突破器件降额限值时立即失效中止。',
+      },
+      dfmeaComment: {
+        lineItem: 'FM-ROBOT-04: 关节谐波减速器回程间隙与驱动板 STO 光耦共因失效',
+        recommendedAction: 'DVT 阶段执行激光干涉仪反向滞环查表补偿与外置安全盒过渡；量产 Rev B 彻底完成 PCB 板级双通道物理隔离与输出双编码器闭环。',
+        targetDate: '按项目评审节点确定',
+        owner: 'Motion Control Lead & Functional Safety Lead',
+      },
+      ecrDescription: {
+        ecrTitle: 'ECR-ROBOT-STO-BACKLASH: 驱动板 Layout 双通道物理隔离与机械双编码器闭环引入',
+        reasonForChange: '现有单板 STO 信号共用光耦与驱动地无法通过 Cat 3 PLd 认证；谐波减速器背隙是否导致末端超差须按本项目实测判定。',
+        proposedSolution: '重构 PCB 走线彻底割接双通道 STO 回路；关节末端增配第二编码器实现全闭环控制；功率泄放电阻外置散热结构。',
+        costEstimate: '改版投板打样及首批外置散热辅料费用与单机关节 BOM 增量均须按本项目报价核算。',
+        toolingLeadTime: 'PCB 投板打样与机械结构微调工期均须按项目排期核算。',
+        impactAssessment: '对量产长期可靠性与安规合规性具有根本性正面提升，无电气负面副作用。',
+      },
+    },
+  };
+}
+
+export function getRobotJointPillars(context: ProjectContext, issue: IssueInput): ScenarioPillars {
+  const hasMeasured = Boolean((issue.actualMeasurement || '').trim());
+  const hasSpec = Boolean((issue.requirement || '').trim());
+  return {
+    classifiedInfo: [
+      { id: 'FACT-01', tag: (hasMeasured ? 'MEASURED' : 'UNKNOWN') as 'MEASURED' | 'UNKNOWN', title: '末端重复定位精度实测', content: hasMeasured ? issue.actualMeasurement! : '待输入：工程师尚未提供实测结果，本工具不会用模板数字代替实测数值。', sourceOrBasis: hasMeasured ? '激光干涉仪/高精度编码器实测' : '尚未提供实测来源', confidenceLevel: hasMeasured ? 95 : 0, verificationMethod: '激光干涉仪正反向重复打靶' },
+      { id: 'FACT-02', tag: (hasSpec ? 'SPEC' : 'UNKNOWN') as 'SPEC' | 'UNKNOWN', title: '客户产线工艺与安规门限', content: hasSpec ? issue.requirement! : '待输入：客户/标准/设计规格尚未提供。', sourceOrBasis: hasSpec ? '客户技术协议与 IEC 61800-5-2 标准' : '尚未提供规格来源', confidenceLevel: hasSpec ? 98 : 0 },
+      { id: 'FACT-03', tag: 'CALCULATED' as const, title: '动能回馈与热阻核算', content: '点位往复搬运的单次减速回馈峰值与连续均方根功率，必须用当前关节的回馈功率输入与泄放电阻额定值代入本地计算（见「确定性预核算事实」）；模板不预填数值。', sourceOrBasis: '机电能量守恒与热阻模型', confidenceLevel: 0, verificationMethod: '热电偶表面测温与功率分析仪' },
+    ],
+    multiRiskBreakdown: {
+      techMargin: { name: '技术裕量', dimensionKey: 'techMargin' as const, score: 85, level: 'High' as const, evidence: '末端精度是否超差、STO 通道独立性是否满足 Cat 3，必须按本地确定性预核算与实测结论判定；模板不预填超差比例。' },
+      reliabilityStress: { name: '可靠性应力', dimensionKey: 'reliabilityStress' as const, score: 78, level: 'Medium-High' as const, evidence: '泄放电阻稳态温升与减速器润滑脂胶合风险，需按实测温升曲线确认（模板不预填温度）。' },
+      scheduleDelay: { name: '节点风险', dimensionKey: 'scheduleDelay' as const, score: 88, level: 'High' as const, evidence: `距离评审仅剩 ${context.daysRemaining} 天，重新投板打样工期需按项目排期核算。` },
+      redesignCost: { name: '改动成本', dimensionKey: 'redesignCost' as const, score: 55, level: 'Medium' as const, evidence: '算法补偿成本低，量产 PCB 改版成本适中' },
+      verificationGap: { name: '验证缺口', dimensionKey: 'verificationGap' as const, score: 62, level: 'Medium-High' as const, evidence: '缺少激光干涉仪全温区滞环与外置安全盒第三方测试' },
+    },
+    whyNotComparison: [
+      {
+        optionId: 'Option A',
+        optionName: '谐波减速器柔轮轴向精密垫片预紧 + STO 双通道物理电气绝对隔离重构 + 泄放电阻移至外壳传热',
+        categoryLabel: '硬件根治方案',
+        isRecommended: false,
+        verdictTitle: '为什么暂不作为首选',
+        coreTradeoffReason: '技术彻底根治但工期较长，会击穿当前 DVT 节点，存在延期违约风险（具体工期按项目排期核算）。',
+        keyRiskOrPenalty: ['改版周期较长', '超出当前节点时限', '需申请特殊延期'],
+        reActivationCondition: '若方案 B 软件补偿在极端低温下失效或第三方机构拒绝外置过渡盒，立即启动本方案。',
+      },
+      {
+        optionId: 'Option B',
+        optionName: '激光干涉仪正反向滞环实测标定 + 软件反向间隙动态补偿 + 外置冗余安全继电器盒过渡',
+        categoryLabel: '软硬协同与双轨推进',
+        isRecommended: true,
+        verdictTitle: '为什么选它',
+        coreTradeoffReason: '不占用板卡改版工期，可在数天内完成软件标定收敛；外置安全盒现场满足 PLd 审查；保住当前 DVT 节点，并为量产改版赢得时间（具体收敛值与工期须实测确认）。',
+        keyRiskOrPenalty: ['软件补偿全寿命磨损后需二次校准', '量产前仍需将双通道集成进 PCB'],
+        reActivationCondition: '当前首选推荐方案。',
+      },
+      {
+        optionId: 'Option C',
+        optionName: '仅在上位机强行降额运行速度，并在驱动固件中屏蔽泄放电阻过热停机阈值',
+        categoryLabel: '纯临时降额违规措施',
+        isRecommended: false,
+        verdictTitle: '为什么坚决否决',
+        coreTradeoffReason: '严重违反产线节拍协议，且 STO 单点失效将导致人机碰撞急停失控，直接触犯强制安规，强制一票否决！',
+        keyRiskOrPenalty: ['单件节拍显著恶化构成违约', '人身安全碰撞隐患', '违法安规红线'],
+        reActivationCondition: '严禁激活该方案！',
+      },
+    ],
+    next24HourPlan: {
+      timeline: [
+        { timeWindow: '00:00 - 04:00', phase: '台架准备与基准复核', task: '架设激光干涉仪与高精角多面棱体，复验肩关节与腕关节正反向定位死区', owner: 'Motion Lead', deliverable: '干涉仪初始滞环测量数据' },
+        { timeWindow: '04:00 - 10:00', phase: '算法查表补偿注入', task: '驱动固件注入双向间隙补偿算法，标定离散 EEPROM 补偿表', owner: 'Embedded Algorithm Engineer', deliverable: 'V1.2 补偿固件与精度回测' },
+        { timeWindow: '10:00 - 16:00', phase: '外置安全过渡盒加装', task: '控制柜串接双通道独立干簧安全继电器，完成单通道故障注入测试', owner: 'Safety HW Lead', deliverable: '安全盒接线与切断测试记录' },
+        { timeWindow: '16:00 - 24:00', phase: '连续满载热测试与纪要', task: '加减速 S 曲线优化，运行 2 小时满载往复节拍，监测泄放电阻温度', owner: 'Test Lead', deliverable: '温升曲线与评审纪要签署' },
+      ],
+      passFailCriteria: [
+        { parameter: '末端重复定位精度', greenCriteria: '实测重复定位精度满足客户规格并留有工程裕量 ➔ 判定达标，准予放行', yellowCriteria: '实测值接近规格上限 ➔ 需扩大样本并复核标定有效性', redCriteria: '实测值超出客户规格 ➔ 立即中止放行，启动机械预紧/改版方案' },
+        { parameter: 'STO 切断硬件独立性', greenCriteria: 'IEC 61800-5-2 Cat 3 PLd 通道独立性通过故障注入验证 ➔ 判定达标', yellowCriteria: '需补充共因失效(CCF)与诊断覆盖率证据 ➔ 受控推进', redCriteria: '任一通道失效导致无法独立切断转矩 ➔ 立即中止，不得进入现场' },
+        { parameter: '泄放电阻稳态温升', greenCriteria: '稳态温升满足器件降额规范 ➔ 判定达标', yellowCriteria: '温升接近降额红线 ➔ 需优化 S 曲线或加大散热', redCriteria: '稳态温升突破器件降额红线 ➔ 立即中止并重新选型' },
+      ],
+    },
+    // [strict 修复] 这里原来用的是 id/projectName/problemSummary/chosenOption/keyTradeoffs/vetoedOptions/approver
+    // 等自定义字段名，与 EngineeringDecisionRecord 完全对不上——UI 读 edrRecord.edrId / coreProblem /
+    // chosenOptionTitle / defenseBasis / signOffSignatures 时全是 undefined。现按类型定义修正。
+    edrRecord: {
+      edrId: `EDR-ROBOT-${Date.now().toString().slice(-6)}`,
+      projectCode: context.projectName || 'ROBOT-JOINT',
+      decisionDate: new Date().toISOString().split('T')[0],
+      decisionMaker: 'Motion Lead & Safety Lead & PM',
+      coreProblem: '协作机器人一体化关节末端精度超差与 STO 通道独立性不达标（具体数值以实测与本地确定性计算为准）。',
+      measuredSnapshot: hasMeasured ? issue.actualMeasurement! : '待输入：工程师尚未提供实测结果。',
+      specThreshold: hasSpec ? issue.requirement! : '待输入：客户/标准/设计规格尚未提供。',
+      engineeringAssumptions: [
+        '假设外置安全继电器过渡盒在产线现场不会被误拔或旁路',
+        '假设软件补偿标定在量产前可由 PCB 板级双通道隔离取代',
+      ],
+      chosenOptionId: 'Option B',
+      chosenOptionTitle: '激光干涉仪正反向滞环实测标定 + 软件反向间隙动态补偿 + 外置冗余安全继电器盒过渡',
+      rejectedOptionsSummary: 'Option C (严重违背产线节拍与安全法规，强制一票否决)。',
+      defenseBasis: '依据 IEC 61800-5-2 Cat 3 PLd 通道独立性与伺服运动学补偿机理：外置双通道安全继电器通过故障注入验证通道独立性，软件补偿在标定后经激光干涉仪复测闭环。',
+      signOffSignatures: [
+        { role: '运动控制负责人', name: 'Motion Lead', status: 'Signed', signDate: new Date().toISOString().split('T')[0] },
+        { role: '功能安全负责人', name: 'Safety Lead', status: 'Pending', signDate: '-' },
+        { role: '项目经理 (PM)', name: 'Project Director', status: 'Pending', signDate: '-' },
+      ],
+      localHashDigest: 'PENDING_CALCULATION',
+    },
+    redTeamChallenge: {
+      auditVerdict: '方案 B 具有高可行性，但必须紧密监控机械磨损对补偿表的长期影响，且量产 PCB 改版不得停滞。',
+      riskGaps: [
+        '谐波减速器全寿命磨损后间隙增大，是否会导致补偿参数失准？',
+        '外部过渡安全继电器盒在产线现场是否会被误拔或旁路？',
+      ],
+      missingEvidenceList: [
+        '全温区（按项目环境谱）下减速器刚度与背隙的热漂移数据',
+        '多轴联动急停时相邻关节母线能量叠加冲击测试',
+      ],
+      confidenceScorePct: 92,
+    },
+  };
+}

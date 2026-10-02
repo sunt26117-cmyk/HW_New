@@ -1,0 +1,23 @@
+name: AutoHW Core CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Lint and type-check
+        run: npm run lint
+      - name: Core and governance tests
+        run: npm test
+      - name: Offline single-file build
+        run: npm run build
