@@ -1,9 +1,10 @@
 import type { AnalysisResult, EngineeringProject, PatternOutput } from '../core/model/contracts.ts';
 import { evaluateBldcPatterns } from '../core/patterns/index.ts';
+import { evaluateEmcPatterns } from '../core/patterns/index.ts';
 import { buildDecisionPlan } from '../core/decision/index.ts';
 import { DELIVERY_DOCS } from '../content/delivery.ts';
 
-export const ENGINE_VERSION = 'autohw-core-p4.1';
+export const ENGINE_VERSION = 'autohw-core-p15.0';
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -21,7 +22,8 @@ function hash(input: string): string {
 export function analyze(project: EngineeringProject): AnalysisResult {
   const inputHash = hash(stableStringify(project));
   const at = new Date().toISOString();
-  const patterns = [...evaluateBldcPatterns(project)].sort((a, b) => riskRank(b.riskLevel) - riskRank(a.riskLevel));
+  const rawPatterns = project.meta.domain === 'EMC' ? evaluateEmcPatterns(project.issue) : evaluateBldcPatterns(project);
+  const patterns = [...rawPatterns].sort((a, b) => riskRank(b.riskLevel) - riskRank(a.riskLevel));
   const missing = Object.entries(project.issue.quantities).filter(([, q]) => q.status === 'missing').map(([k, q]) => `${k}：${q.status === 'missing' ? q.need : ''}`);
   const assumptions = Object.entries(project.issue.quantities).filter(([, q]) => q.status === 'ok' && q.evidence === 'ASSUMED').map(([k]) => k);
   const vetoes = patterns.filter((p) => p.veto.triggered).map((p) => ({ patternId: p.id, reason: p.veto.reason }));
@@ -31,7 +33,7 @@ export function analyze(project: EngineeringProject): AnalysisResult {
     meta: { analysisId: `${project.meta.projectId}:${inputHash}`, inputHash, engineVersion: ENGINE_VERSION, at, domain: project.meta.domain, source: 'DETERMINISTIC' },
     facts: { quantities: Object.values(project.issue.quantities), missing, assumptions },
     judgment: { patterns, ...(dominant ? { dominant } : {}), vetoes },
-    action: { ...buildDecisionPlan(patterns, { phase: project.meta.phase, daysRemaining: project.meta.daysRemaining }), docs: [DELIVERY_DOCS.RACI, DELIVERY_DOCS.EDR, DELIVERY_DOCS['8D'], DELIVERY_DOCS.CONTROLLED] },
+    action: { ...buildDecisionPlan(patterns, { phase: project.meta.phase, daysRemaining: project.meta.daysRemaining }), docs: [DELIVERY_DOCS.RACI, DELIVERY_DOCS.EDR, DELIVERY_DOCS.CONTROLLED] },
   };
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "ecu-hardware-copilot",
   "private": true,
-  "version": "0.1.0-alpha.1",
+  "version": "0.2.0-alpha.6",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,7 @@
     "lint": "tsc --noEmit && eslint \"src/**/*.ts\" \"src/**/*.tsx\"",
     "typecheck:core": "tsc -p tsconfig.core.json",
     "test": "npm run typecheck:core && vitest run tests && npm run test:policy",
-    "test:policy": "node --experimental-strip-types scripts/verify-autohw-core.ts && node scripts/verify-autohw-core-policy.cjs && node --experimental-strip-types scripts/verify-phase4.ts && node scripts/verify-phase5-navigation.cjs && node --experimental-strip-types scripts/verify-phase5-route.cjs && node scripts/verify-phase6-content.cjs && node --experimental-strip-types scripts/verify-phase7-versioning.ts && node --experimental-strip-types scripts/verify-phase8-ai.ts && node scripts/verify-phase8-ai.cjs && node scripts/verify-phase9-selfcheck.cjs && node --experimental-strip-types scripts/verify-phase10-physics.ts",
+    "test:policy": "node --experimental-strip-types scripts/verify-autohw-core.ts && node scripts/verify-autohw-core-policy.cjs && node --experimental-strip-types scripts/verify-phase4.ts && node scripts/verify-phase5-navigation.cjs && node --experimental-strip-types scripts/verify-phase5-route.cjs && node scripts/verify-phase6-content.cjs && node --experimental-strip-types scripts/verify-phase7-versioning.ts && node --experimental-strip-types scripts/verify-phase8-ai.ts && node scripts/verify-phase8-ai.cjs && node scripts/verify-phase9-selfcheck.cjs && node --experimental-strip-types scripts/verify-phase10-physics.ts && node --experimental-strip-types scripts/verify-phase11-evidence.ts && node --experimental-strip-types scripts/verify-phase12-emc.ts && node --experimental-strip-types scripts/verify-phase13-sensitivity.ts && node --experimental-strip-types scripts/verify-phase14-waveform.ts && node --experimental-strip-types scripts/verify-phase15-gold.ts && node --experimental-strip-types scripts/verify-phase16-emc-causality.ts",
     "test:vitest": "vitest run tests",
     "test:phase4": "node --experimental-strip-types scripts/verify-phase4.ts",
     "test:phase5": "node scripts/verify-phase5-navigation.cjs && node --experimental-strip-types scripts/verify-phase5-route.cjs",

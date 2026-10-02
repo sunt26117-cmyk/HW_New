@@ -2,7 +2,7 @@
   const { parseHash, normalizeRoute } = await import('../src/ui/navigationModel.ts');
   const cases = [
     ['#home', {screen:'home'}],
-    ['#input/bldc', {screen:'input',sub:'bldc'}],
+    ['#input/parameters', {screen:'input',sub:'parameters'}],
     ['#physics/patterns', {screen:'physics',sub:'patterns'}],
     ['#plan/options', {screen:'plan',sub:'options'}],
     ['#deliver/package', {screen:'deliver',sub:'package'}],

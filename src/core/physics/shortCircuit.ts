@@ -33,6 +33,6 @@ export function calculateShortCircuitEnergy(input: ShortCircuitEnergyInput): Phy
     { name: 'vdsV', value: r.value.vdsV, min: 0 }, { name: 'currentA', value: r.value.currentA, min: 0 }, { name: 'durationUs', value: r.value.durationUs, min: 0 },
   ]);
   if (domain.status !== 'ok') return domain;
-  const energyJ = r.value.vdsV * r.value.currentA * r.value.durationUs * 1e-3;
+  const energyJ = r.value.vdsV * r.value.currentA * r.value.durationUs * 1e-6;
   return Number.isFinite(energyJ) ? { status: 'ok', value: energyJ } : { status: 'insufficient_input', need: ['short-circuit energy result must be finite'] };
 }

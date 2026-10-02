@@ -28,13 +28,18 @@ AI 只接收确定性 `facts + judgment`，生成可选 `narrative`；数字必�
 
 ## 当前 BLDC 范围
 
-Phase 0–9 活动主线实现；Phase 10 增加物理安全回归守护：
+Phase 0–11 活动主线实现；Phase 10 增加物理安全回归守护，Phase 11/v4 把旧版成熟工程能力重新接回新架构：5 个主屏幕（工程能力工作台）只是导航组织，不是功能删减：
 
 - `BLDC.P001` 母线泵升
 - `BLDC.P003` 米勒误导通
 - `BLDC.P006` 热-电级联
 - `BLDC.P016` Fault-to-Off ↔ SOA
 - P006 热模型区分“无稳态热失控”与“仅迭代预算不足”，并对物理输入域做前置校验
+- 示波器 CSV/TXT 导入、Vbus/Vgs/Vds 角色映射、20–80% dv/dt、基线、振铃、均匀采样 FFT、实测证据回填与本地留存
+- 器件/规格书 JSON/TXT 导入、参数候选、人工确认/映射、实测保护、器件库与器件对比
+- 工况案卷、WCCA/Foster/电压裕量/换相/安全链工具、Verification Loop、评审回归、版本/A-B 与完整工作区备份
+- BLDC 输入 catalog 共 70 个 canonical 数值字段，按 Pattern 关系分组，并支持字段搜索/只看缺失；不产生数字默认值
+- 规格书工作台当前活动边界为结构化 JSON/TXT（可来自 AI/OCR 提取），直接值/派生/曲线/未映射严格分层
 
 ## 工程铁律
 
@@ -63,6 +68,6 @@ npm run build
 
 ## 测试边界
 
-当前 `src/fixtures/bldc.ts` 是 synthetic structural fixture。真实台架黄金用例必须由工程师实测数据建立后，再作为物理公式最终终审依据。
+当前 `src/fixtures/bldc.ts` 是 synthetic structural fixture。真实台架黄金用例必须由工程师实测数据建立后，再作为物理公式最终终审依据。当前规格书工作台接收结构化 JSON/TXT（含 AI/OCR 提取结果）；原始 PDF/扫描件解析器尚未作为活动核心接入。
 
 完整网络安装/Visual build 尚未在生成环境执行；详见 `docs/AUTOHW_CORE_STATUS.md`。

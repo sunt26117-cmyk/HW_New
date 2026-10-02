@@ -2,9 +2,9 @@
 
 ## 主线
 
-当前仓库已经从旧 14/7 工作台体系切换到 AutoHW Core 主线。旧实现不再属于活动应用，统一归档到 `legacy/`；活动代码只在 `src/app`、`src/core`、`src/ui`、`src/content`、`src/fixtures`。
+当前仓库已经从旧 14/7 工作台体系切换到 AutoHW Core 主线；v4 重新接回旧版成熟工程能力，但不恢复旧版多真源架构。旧实现不再属于活动应用，统一归档到 `legacy/`；活动代码只在 `src/app`、`src/core`、`src/ui`、`src/content`、`src/fixtures`。
 
-## Phase 0–9
+## Phase 0–11 + v4 工程工作台
 
 - Phase 0：脚手架、分层护栏、Core 依赖治理。
 - Phase 1：Quantity / PatternOutput / AnalysisResult / Trace / Zod contract。
@@ -16,6 +16,9 @@
 - Phase 7：analysisId/inputHash 版本快照 + A/B diff。
 - Phase 8：可拔插 AI narrative adapter + Trace ID / number audit，失败回退 deterministic-only。
 - Phase 9：offline single-file 配置 + 浏览器自检。
+- Phase 10：热失控语义、稳定过温、非法物理输入与状态映射回归守护。
+- Phase 11 / v4 fusion：示波器证据、70 个 BLDC canonical 输入字段、规格书/器件库、工况、工程计算器、WCCA/Foster、Verification Loop、评审回归、版本/A-B、完整工作区备份。
+- v4 修复：示波器非递增时间轴拒绝；FFT 非 2 次幂输入不再产生均值归一化偏差；Vds 不再冒充 Vbus；字段工作区支持搜索与只看缺失。
 
 ## 已实际通过（最终活动源码树）
 
@@ -32,6 +35,11 @@
 ✓ AUTOHW CORE PHASE 9 OFFLINE POLICY PASS
 ✓ browser-equivalent deterministic self-check: 4/4 PASS
 ✓ final architecture scan: legacy implementation absent from active src/
+✓ AUTOHW CORE PHASE 10 PHYSICS SAFETY VERIFY PASS
+✓ AUTOHW CORE PHASE 11 EVIDENCE VERIFY PASS
+✓ v4 rich engineering workspace policy scan PASS
+✓ waveform boundary / FFT / Vbus-Vds separation regression PASS
+✓ BLDC input catalog 70 fields / 10 groups PASS
 ```
 
 ## 尚未在本运行环境执行

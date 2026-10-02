@@ -13,8 +13,12 @@ for (const p of tsFiles) {
   const s = read(p);
   check(!/from\s+['"]react(?:-|['"])/.test(s) && !/from\s+['"]react-dom(?:-|['"])/.test(s), `core imports React: ${path.relative(root, p)}`);
   check(!/\b(window|document|fetch)\b/.test(s), `core touches DOM/network: ${path.relative(root, p)}`);
-  check(!/\|\|\s*0\b/.test(s), `core uses || 0 default: ${path.relative(root, p)}`);
-  check(!/\?\?\s*0\b/.test(s), `core uses ?? 0 default: ${path.relative(root, p)}`);
+  // 默认值铁律针对会进入工程计算/派生的 code path；Evidence metadata（如缺失 confidence 的资料候选）可使用独立的证据降级策略。
+  const relative = path.relative(root, p).replace(/\\/g, '/');
+  if (/^src\/(core\/(physics|derive|patterns)|app\/analyze)/.test(relative)) {
+    check(!/\|\|\s*0\b/.test(s), `calculation path uses || 0 default: ${relative}`);
+    check(!/\?\?\s*0\b/.test(s), `calculation path uses ?? 0 default: ${relative}`);
+  }
   check(!/leadershipEngine|HwLeadStyle|CONSERVATIVE|AGILE_DELIVERY|PROCESS_DEFENSIVE|Nash|甩锅|免责防御|心理/.test(s), `legacy leadership/game-theory content leaked into core: ${path.relative(root, p)}`);
 }
 

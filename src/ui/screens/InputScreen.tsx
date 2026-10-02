@@ -1,53 +1,71 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { navigate, useNavigation } from '../navigation.ts';
 import type { Dispatch, SetStateAction } from 'react';
-import type { EvidenceKind, EngineeringProject, Quantity } from '../../core/model/contracts.ts';
+import type { EngineeringProject, EvidenceKind } from '../../core/model/contracts.ts';
 import { INPUT_GROUPS } from '../inputCatalog.ts';
+import { EMC_INPUT_GROUPS } from '../emcCatalog.ts';
+import { WaveformWorkbench } from '../evidence/WaveformWorkbench.tsx';
+import { DeviceWorkbench } from '../evidence/DeviceWorkbench.tsx';
+import { ScenarioWorkbench } from '../evidence/ScenarioWorkbench.tsx';
+import type { DeviceFieldProvenance } from '../../core/evidence/deviceCandidateImport.ts';
 
 const EVIDENCE: EvidenceKind[] = ['MEASURED', 'IMPORTED', 'DATASHEET', 'DERIVED', 'TEXT_INFERRED', 'ASSUMED'];
+type Tab = 'parameters' | 'waveform' | 'device' | 'scenario';
+const EVIDENCE_LABEL: Record<EvidenceKind, string> = { MEASURED:'实测', IMPORTED:'导入', DATASHEET:'规格书', DERIVED:'派生', TEXT_INFERRED:'文本推断', ASSUMED:'明确假设' };
 
 export function InputScreen({ project, onProjectChange }: { project: EngineeringProject; onProjectChange: Dispatch<SetStateAction<EngineeringProject>> }) {
-  const missing = useMemo(() => Object.values(project.issue.quantities).filter((q) => q.status === 'missing').length, [project.issue.quantities]);
-  const updateMeta = (field: 'projectName' | 'phase', value: string) => onProjectChange((prev) => ({ ...prev, meta: { ...prev.meta, [field]: value } }));
+  const route = useNavigation();
+  const tab = (route.sub && ['parameters','waveform','device','scenario'].includes(route.sub) ? route.sub : 'parameters') as Tab;
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({ P001:true, P003:true, P006:true, P016:true });
+  const [fieldSearch, setFieldSearch] = useState('');
+  const [onlyMissing, setOnlyMissing] = useState(false);
+  const counts = useMemo(() => {
+    const result = { missing:0, measured:0, datasheet:0, imported:0, derived:0, assumed:0 };
+    for (const q of Object.values(project.issue.quantities)) {
+      if (q.status === 'missing') result.missing += 1;
+      else if (q.evidence === 'MEASURED') result.measured += 1;
+      else if (q.evidence === 'DATASHEET') result.datasheet += 1;
+      else if (q.evidence === 'IMPORTED') result.imported += 1;
+      else if (q.evidence === 'DERIVED') result.derived += 1;
+      else if (q.evidence === 'ASSUMED') result.assumed += 1;
+    }
+    return result;
+  }, [project.issue.quantities]);
+
+  const updateMeta = (field: 'projectName' | 'phase' | 'daysRemaining' | 'domain', value: string) => onProjectChange((prev) => { if (field === 'domain') return { ...prev, meta: { ...prev.meta, domain: value === 'EMC' ? 'EMC' : 'BLDC' } }; if (field === 'daysRemaining') return { ...prev, meta: { ...prev.meta, daysRemaining: value.trim()==='' ? undefined : Number(value) } }; return { ...prev, meta: { ...prev.meta, [field]: value } }; });
   const updateIssue = (field: 'title' | 'phenomenon' | 'requirement' | 'testCondition', value: string) => onProjectChange((prev) => ({ ...prev, issue: { ...prev.issue, [field]: value } }));
-  const updateQuantity = (key: string, unit: string, value: string, evidence: string, sourceLabel: string) => {
-    onProjectChange((prev) => {
-      const next = { ...prev.issue.quantities };
-      const numeric = value.trim() === '' ? undefined : Number(value);
-      if (numeric === undefined || !Number.isFinite(numeric) || !EVIDENCE.includes(evidence as EvidenceKind)) next[key] = { status: 'missing', unit, need: `需要有效数值与证据类型：${key}` };
-      else next[key] = { status: 'ok', value: numeric, unit, evidence: evidence as EvidenceKind, ...(sourceLabel.trim() ? { sourceLabel: sourceLabel.trim() } : {}), enteredAt: new Date().toISOString() };
-      return { ...prev, issue: { ...prev.issue, quantities: next } };
-    });
-  };
+  const updateQuantity = (key: string, unit: string, value: string, evidence: string, sourceLabel: string) => onProjectChange((prev) => {
+    const next = { ...prev.issue.quantities };
+    const numeric = value.trim() === '' ? undefined : Number(value);
+    if (numeric === undefined || !Number.isFinite(numeric) || !EVIDENCE.includes(evidence as EvidenceKind)) next[key] = { status: 'missing', unit, need: `需要有效数值与证据类型：${key}` };
+    else next[key] = { status: 'ok', value: numeric, unit, evidence: evidence as EvidenceKind, ...(sourceLabel.trim() ? { sourceLabel: sourceLabel.trim() } : {}), enteredAt: new Date().toISOString() };
+    return { ...prev, issue: { ...prev.issue, quantities: next } };
+  });
+  const applyEvidence = (values: Record<string, number | string>, provenance: Record<string, DeviceFieldProvenance>, options?: { allowOverwriteMeasured?: boolean }) => onProjectChange((prev) => {
+    const quantities = { ...prev.issue.quantities };
+    for (const [key, raw] of Object.entries(values)) {
+      if (typeof raw !== 'number' || !Number.isFinite(raw)) continue;
+      const p = provenance[key];
+      const existing = quantities[key];
+      if (existing?.status === 'ok' && existing.evidence === 'MEASURED' && !options?.allowOverwriteMeasured) continue;
+      quantities[key] = { status: 'ok', value: raw, unit: existing?.unit || '', evidence: p?.source || 'IMPORTED', sourceLabel: p?.sourceLabel, evidenceId: p?.evidenceId, enteredAt: p?.enteredAt || new Date().toISOString() };
+    }
+    return { ...prev, issue: { ...prev.issue, quantities } };
+  });
 
-  return (
-    <div className="space-y-5">
-      <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5"><div className="flex items-end justify-between gap-4"><div><h1 className="text-xl font-semibold">输入与证据</h1><p className="mt-1 text-sm text-slate-400">只录入工程事实与证据来源；空值就是 missing，不自动填经验值。</p></div><div className="text-right"><div className="text-xs text-slate-500">缺失输入</div><div className="text-2xl font-semibold text-amber-300">{missing}</div></div></div></section>
+  return <div className="space-y-5">
+    <section className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 shadow-xl shadow-black/10"><div className="flex flex-wrap items-end justify-between gap-4"><div><div className="text-[11px] uppercase tracking-[.18em] text-blue-300">Engineering Evidence Workspace</div><h1 className="mt-1 text-xl font-semibold">输入与证据</h1><p className="mt-1 max-w-3xl text-sm text-slate-400">不是单纯“填参数”：工程输入、示波器实测、规格书候选、工况案卷都在这里进入统一 Evidence；进入 Core 后再由 Physics / Pattern 决策。</p></div><div className="grid grid-cols-3 gap-2 text-center text-[10px]"><Stat n={counts.missing} label="缺失" tone="amber"/><Stat n={counts.measured} label="实测" tone="green"/><Stat n={counts.datasheet+counts.imported+counts.derived} label="资料/导入" tone="blue"/></div></div><div className="mt-5 flex flex-wrap gap-1">{([['parameters','工程参数'],['waveform','示波器波形'],['device','器件 / 规格书'],['scenario','工况 / 案卷']] as const).map(([id,label])=><button key={id} onClick={()=>navigate({ screen: 'input', sub: id })} className={`rounded-lg px-3 py-2 text-xs ${tab===id?'bg-blue-600/20 text-blue-300 border border-blue-500/30':'text-slate-400 hover:bg-slate-800'}`}>{label}</button>)}</div></section>
 
-      <section className="grid gap-4 md:grid-cols-2">
-        <label className="rounded-xl border border-slate-800 bg-slate-900 p-3"><span className="text-[11px] text-slate-500">项目名称</span><input value={project.meta.projectName} onChange={(e) => updateMeta('projectName', e.target.value)} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none" placeholder="工程项目" /></label>
-        <label className="rounded-xl border border-slate-800 bg-slate-900 p-3"><span className="text-[11px] text-slate-500">项目阶段</span><input value={project.meta.phase} onChange={(e) => updateMeta('phase', e.target.value)} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none" placeholder="EVT / DVT / SOP" /></label>
-        <label className="rounded-xl border border-slate-800 bg-slate-900 p-3 md:col-span-2"><span className="text-[11px] text-slate-500">工程问题</span><input value={project.issue.title} onChange={(e) => updateIssue('title', e.target.value)} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none" placeholder="例如：高 dv/dt 下出现异常 Vgs 尖峰" /></label>
-      </section>
+    {tab === 'parameters' && <>
+      <section className="grid gap-3 md:grid-cols-[1fr_1fr_180px]"><label className="rounded-xl border border-slate-800 bg-slate-900 p-3"><span className="text-[11px] text-slate-500">项目名称</span><input value={project.meta.projectName} onChange={(e)=>updateMeta('projectName',e.target.value)} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none" placeholder="工程项目" /></label><label className="rounded-xl border border-slate-800 bg-slate-900 p-3"><span className="text-[11px] text-slate-500">工程域</span><select value={project.meta.domain} onChange={(e)=>updateMeta('domain',e.target.value)} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none"><option value="BLDC">BLDC / Motor Drive</option><option value="EMC">EMC / BCI</option></select></label><label className="rounded-xl border border-slate-800 bg-slate-900 p-3"><span className="text-[11px] text-slate-500">剩余天数</span><input type="number" value={project.meta.daysRemaining ?? ''} onChange={(e)=>updateMeta('daysRemaining',e.target.value)} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono outline-none" placeholder="不填=未知" /></label><label className="rounded-xl border border-slate-800 bg-slate-900 p-3 md:col-span-3"><span className="text-[11px] text-slate-500">工程问题</span><input value={project.issue.title} onChange={(e)=>updateIssue('title',e.target.value)} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none" placeholder="例如：高 dv/dt 下出现异常 Vgs 尖峰" /></label><label className="rounded-xl border border-slate-800 bg-slate-900 p-3 md:col-span-3"><span className="text-[11px] text-slate-500">现象 / 试验条件 / 要求（可展开）</span><textarea value={project.issue.phenomenon || ''} onChange={(e)=>updateIssue('phenomenon',e.target.value)} className="mt-2 min-h-20 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs leading-relaxed outline-none" placeholder="先写工程事实，不写 AI 判断。"/><div className="mt-2 grid gap-2 md:grid-cols-2"><textarea value={project.issue.testCondition || ''} onChange={(e)=>updateIssue('testCondition',e.target.value)} className="min-h-16 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs outline-none" placeholder="试验条件"/><textarea value={project.issue.requirement || ''} onChange={(e)=>updateIssue('requirement',e.target.value)} className="min-h-16 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs outline-none" placeholder="要求/限值"/></div></label></section>
+      <section className="rounded-2xl border border-slate-800 bg-slate-900/90 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><div className="text-sm font-semibold">{project.meta.domain === 'BLDC' ? '全部 BLDC 工程字段' : 'EMC / BCI 工程字段'}</div><div className="mt-1 text-[11px] text-slate-500">保留旧版完整输入面，但按工程关系分组；搜索不会改变数据，也不会产生默认值。</div></div><div className="flex flex-wrap items-center gap-2"><input value={fieldSearch} onChange={(e)=>setFieldSearch(e.target.value)} className="w-56 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs outline-none" placeholder="搜索字段名 / key"/><label className="flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300"><input type="checkbox" checked={onlyMissing} onChange={(e)=>setOnlyMissing(e.target.checked)}/>只看缺失</label></div></div></section>
+      {project.meta.domain === 'BLDC' && INPUT_GROUPS.map((group)=><section key={group.id} className="rounded-2xl border border-slate-800 bg-slate-900/90"><div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4"><div><div className="flex items-center gap-2"><h2 className="text-sm font-semibold">{group.id} · {group.title}</h2><span className="rounded-full border border-slate-700 px-2 py-0.5 text-[9px] text-slate-500">{group.fields.length} 字段</span></div><div className="mt-1 text-[11px] text-slate-500">{group.description}</div></div><button onClick={()=>setExpanded((prev)=>({...prev,[group.id]:!(prev[group.id] ?? false)}))} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-[11px] text-slate-300">{expanded[group.id] ? '收起' : '展开'}</button></div>{(expanded[group.id] || fieldSearch.trim() !== '') && <div className="border-t border-slate-800 px-5 py-4 space-y-2">{group.fields.map((field)=>{const q=project.issue.quantities[field.key];const matches=!fieldSearch.trim() || `${field.label} ${field.key}`.toLowerCase().includes(fieldSearch.trim().toLowerCase());const missingOnly=!onlyMissing || q?.status !== 'ok';if(!matches || !missingOnly) return null;const required=field.requiredBy.some((id)=>group.id.split('/').includes(id));const value=q?.status==='ok'?String(q.value):'';const evidence=q?.status==='ok'?q.evidence:'';const sourceLabel=q?.status==='ok'?q.sourceLabel||'':'';return <div key={field.key} className={`grid gap-2 rounded-xl border p-3 md:grid-cols-[minmax(190px,1fr)_150px_150px_minmax(160px,.9fr)] md:items-center ${required?'border-slate-700 bg-slate-950/50':'border-slate-800 bg-slate-950/25'}`}><div><div className="flex flex-wrap items-center gap-2 text-sm text-slate-200">{field.label}{required&&<span className="rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[9px] text-blue-300">P必需</span>}</div><div className="mt-1 text-[10px] font-mono text-slate-500">{field.key} · {field.unit}</div></div><input type="number" value={value} onChange={(e)=>updateQuantity(field.key,field.unit,e.target.value,evidence,sourceLabel)} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono outline-none" placeholder="missing"/><select value={evidence} onChange={(e)=>updateQuantity(field.key,field.unit,value,e.target.value,sourceLabel)} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs outline-none"><option value="">证据来源</option>{EVIDENCE.map((e)=><option key={e} value={e}>{EVIDENCE_LABEL[e]} · {e}</option>)}</select><div><input value={sourceLabel} onChange={(e)=>updateQuantity(field.key,field.unit,value,evidence,e.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs outline-none" placeholder="来源 / 证据 ID 标签"/>{q?.status==='ok'&&<div className="mt-1 flex items-center gap-2 text-[9px] text-slate-500"><span>{EVIDENCE_LABEL[q.evidence]}</span><span>{q.evidenceId ? `· ${q.evidenceId}` : ''}</span></div>}</div></div>})}</div>}</section>)}
+      {project.meta.domain === 'EMC' && EMC_INPUT_GROUPS.map((group)=><section key={`emc-${group.id}`} className="rounded-2xl border border-slate-800 bg-slate-900/90"><div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4"><div><h2 className="text-sm font-semibold">{group.id} · {group.title}</h2><div className="mt-1 text-[11px] text-slate-500">{group.description}</div></div></div><div className="border-t border-slate-800 px-5 py-4 space-y-2">{group.fields.map((field)=>{const q=project.issue.quantities[field.key];const value=q?.status==='ok'?String(q.value):'';const evidence=q?.status==='ok'?q.evidence:'';const sourceLabel=q?.status==='ok'?q.sourceLabel||'':'';return <div key={field.key} className="grid gap-2 rounded-xl border border-slate-800 bg-slate-950/25 p-3 md:grid-cols-[minmax(220px,1fr)_150px_150px_minmax(160px,.9fr)] md:items-center"><div><div className="text-sm text-slate-200">{field.label}</div><div className="mt-1 text-[10px] font-mono text-slate-500">{field.key} · {field.unit}</div></div><input type="number" value={value} onChange={(e)=>updateQuantity(field.key,field.unit,e.target.value,evidence,sourceLabel)} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono outline-none" placeholder="missing"/><select value={evidence} onChange={(e)=>updateQuantity(field.key,field.unit,value,e.target.value,sourceLabel)} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs outline-none"><option value="">证据来源</option>{EVIDENCE.map((e)=><option key={e} value={e}>{EVIDENCE_LABEL[e]} · {e}</option>)}</select><input value={sourceLabel} onChange={(e)=>updateQuantity(field.key,field.unit,value,evidence,e.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs outline-none" placeholder="来源 / 证据 ID 标签"/></div>})}</div></section>)}
+    </>}
 
-      {INPUT_GROUPS.map((group) => (
-        <section key={group.id} className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-          <div className="flex items-center justify-between gap-3"><div><h2 className="text-sm font-semibold">{group.id} · {group.title}</h2><div className="mt-1 text-[11px] text-slate-500">字段由 Core 派生契约提供。</div></div><span className="text-[11px] text-slate-500">{group.fields.length} 个字段</span></div>
-          <div className="mt-4 space-y-2">
-            {group.fields.map((field) => {
-              const q = project.issue.quantities[field.key];
-              const value = q?.status === 'ok' ? String(q.value) : '';
-              const evidence = q?.status === 'ok' ? q.evidence : '';
-              const sourceLabel = q?.status === 'ok' ? q.sourceLabel ?? '' : '';
-              return <div key={field.key} className="grid gap-2 rounded-xl border border-slate-800/80 bg-slate-950/40 p-3 md:grid-cols-[minmax(170px,1.2fr)_150px_160px_minmax(140px,1fr)] md:items-center">
-                <div><div className="text-sm text-slate-200">{field.label}</div><div className="mt-1 text-[10px] font-mono text-slate-500">{field.key} · {field.unit}{field.requiredBy.length ? ` · required ${field.requiredBy.join(',')}` : ''}</div></div>
-                <input type="number" value={value} onChange={(e) => updateQuantity(field.key, field.unit, e.target.value, evidence, sourceLabel)} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono outline-none" placeholder="missing" />
-                <select value={evidence} onChange={(e) => updateQuantity(field.key, field.unit, value, e.target.value, sourceLabel)} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs outline-none"><option value="">选择证据</option>{EVIDENCE.map((e) => <option key={e} value={e}>{e}</option>)}</select>
-                <input value={sourceLabel} onChange={(e) => updateQuantity(field.key, field.unit, value, evidence, e.target.value)} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs outline-none" placeholder="来源标签（可选）" />
-              </div>;
-            })}
-          </div>
-        </section>
-      ))}
-    </div>
-  );
+    {tab === 'waveform' && <WaveformWorkbench project={project} onApplyValues={applyEvidence} />}
+    {tab === 'device' && <DeviceWorkbench project={project} onApplyValues={applyEvidence} onDeviceSelect={(deviceId)=>onProjectChange((prev)=>({...prev,meta:{...prev.meta,selectedDeviceId:deviceId}}))} />}
+    {tab === 'scenario' && <ScenarioWorkbench project={project} onProjectChange={onProjectChange} />}
+  </div>;
 }
+function Stat({ n, label, tone }: { n:number; label:string; tone:'amber'|'green'|'blue' }) { const cls=tone==='amber'?'text-amber-300':tone==='green'?'text-emerald-300':'text-blue-300'; return <div className="rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2"><div className={`text-lg font-semibold ${cls}`}>{n}</div><div className="text-slate-500">{label}</div></div>; }

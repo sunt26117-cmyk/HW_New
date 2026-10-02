@@ -15,4 +15,4 @@ npm run build
 - `npm test` 同时跑 Vitest 与 AutoHW Core 治理断言。
 - `npm run lint` 执行完整 TypeScript 检查 + ESLint。
 
-真实台架数据进入 `src/fixtures/gold/` 前，不得把 synthetic fixture 当作工程黄金用例。
+真实台架数据进入 `src/fixtures/gold/` 前，不得把 synthetic fixture 当作工程黄金用例。当前 v4 的规格书入口为 JSON/TXT 结构化提取结果；原始 PDF/扫描件解析保持为后续独立适配器。

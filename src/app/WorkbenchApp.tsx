@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { EngineeringProject, Quantity } from '../core/model/contracts.ts';
 import { analyze } from './analyze.ts';
+import { loadActiveProject, saveActiveProject } from './projectRepository.ts';
 import { INPUT_GROUPS } from '../ui/inputCatalog.ts';
+import { EMC_INPUT_GROUPS } from '../ui/emcCatalog.ts';
 import { navigate, useNavigation, type Screen } from '../ui/navigation.ts';
 import { SHELL_CONTENT } from '../content/shell.ts';
 import { HomeScreen } from '../ui/screens/HomeScreen.tsx';
@@ -13,7 +15,7 @@ import { ScreenErrorBoundary } from '../ui/components/ScreenErrorBoundary.tsx';
 
 function createEmptyProject(): EngineeringProject {
   const quantities: Record<string, Quantity> = {};
-  for (const group of INPUT_GROUPS) for (const field of group.fields) {
+  for (const group of [...INPUT_GROUPS, ...EMC_INPUT_GROUPS]) for (const field of group.fields) {
     quantities[field.key] = { status: 'missing', unit: field.unit, need: `需要提供：${field.label}` };
   }
   return { meta: { projectId: 'live-project', projectName: '', domain: 'BLDC', phase: 'EVT', at: 'live' }, issue: { title: '', phenomenon: '', requirement: '', testCondition: '', quantities } };
@@ -21,15 +23,16 @@ function createEmptyProject(): EngineeringProject {
 
 export default function WorkbenchApp() {
   const route = useNavigation();
-  const [project, setProject] = useState<EngineeringProject>(() => createEmptyProject());
+  const [project, setProject] = useState<EngineeringProject>(() => loadActiveProject(createEmptyProject()));
+  useEffect(() => { saveActiveProject(project); }, [project]);
   const result = useMemo(() => analyze(project), [project]);
 
   const screens: Record<Screen, React.ReactNode> = {
     home: <HomeScreen result={result} project={project} />, 
     input: <InputScreen project={project} onProjectChange={setProject} />,
-    physics: <PhysicsScreen result={result} />,
+    physics: <PhysicsScreen result={result} project={project} />,
     plan: <PlanScreen result={result} />,
-    deliver: <DeliverScreen result={result} project={project} />,
+    deliver: <DeliverScreen result={result} project={project} onProjectChange={(next)=>setProject(next)} />,
   };
 
   return (
@@ -42,7 +45,7 @@ export default function WorkbenchApp() {
           </div>
           <nav className="flex flex-wrap gap-1">
             {(Object.entries(SHELL_CONTENT.screens) as Array<[Screen,string]>).map(([screen, label]) => (
-              <button key={screen} onClick={() => navigate({ screen, sub: screen === 'home' ? undefined : screen === 'input' ? 'bldc' : screen === 'physics' ? 'patterns' : screen === 'plan' ? 'options' : 'package' })} className={`rounded-lg px-3 py-2 text-xs transition ${route.screen === screen ? 'bg-slate-800 text-white' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}>{label}</button>
+              <button key={screen} onClick={() => navigate({ screen, sub: screen === 'home' ? undefined : screen === 'input' ? 'parameters' : screen === 'physics' ? 'patterns' : screen === 'plan' ? 'options' : 'package' })} className={`rounded-lg px-3 py-2 text-xs transition ${route.screen === screen ? 'bg-slate-800 text-white' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}>{label}</button>
             ))}
           </nav>
         </div>

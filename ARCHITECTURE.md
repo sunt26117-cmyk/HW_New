@@ -29,3 +29,14 @@ Every VETO is created by a Pattern. Every numeric AI statement must match determ
 ## Current scope
 
 BLDC deep-first Phase 0–9 implementation covers P001/P003/P006/P016; Phase 10 adds physics-safety regression guards for thermal runaway semantics and numeric input-domain validation. Other legacy domains are archived under `legacy/` and are not part of the active application or build.
+
+## Rich engineering workspaces (v4 fusion)
+
+The five-screen rule is a navigation rule, not a feature-removal rule. Mature engineering capabilities are hosted inside those screens:
+
+- Input & Evidence: scope CSV/TXT import, channel-role mapping, waveform metrics/FFT, saved measured evidence, device/spec JSON import, candidate mapping/confirmation, device library, device comparison, scenario templates and local cases.
+- Physics & Mechanism: deterministic Pattern/Trace plus an engineering toolbox (bus pumping, Miller, thermal cascade, protection/SOA, snubber, deadtime, bandwidth/resonance, WCCA, Foster transient thermal, DC voltage margin, commutation and safety-chain timing).
+- Plan & Verification: option comparison, Verification Loop, regression review and deterministic re-run entry points.
+- Delivery: analysis export, technical RACI, EDR/8D/controlled-document material, version/A-B history and complete workspace backup/restore.
+
+The rule remains: these workspaces may read current project/evidence data, but they do not create a second deterministic source of truth for formal risk conclusions.

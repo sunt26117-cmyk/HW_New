@@ -1,3 +1,5 @@
+export type EngineeringDomain = 'BLDC' | 'EMC';
+
 export type EvidenceKind =
   | 'MEASURED'
   | 'IMPORTED'
@@ -133,9 +135,10 @@ export interface AuditReport {
 export interface ProjectMeta {
   projectId: string;
   projectName: string;
-  domain: 'BLDC';
+  domain: EngineeringDomain;
   phase: string;
   daysRemaining?: number;
+  selectedDeviceId?: string;
   at: string;
 }
 
@@ -158,7 +161,7 @@ export interface AnalysisResult {
     inputHash: string;
     engineVersion: string;
     at: string;
-    domain: 'BLDC';
+    domain: EngineeringDomain;
     source: 'DETERMINISTIC' | 'AI_ENHANCED';
   };
   facts: { quantities: Quantity[]; missing: string[]; assumptions: string[] };
